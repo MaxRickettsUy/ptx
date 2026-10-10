@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Circle, CircleCheck, CircleX } from "lucide-react";
+import { Circle, CircleCheck, CircleX } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -20,8 +20,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   Sidebar,
   SidebarContent,
@@ -40,7 +41,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
-import { useCollapsed } from "@/hooks/use-collapsed";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
 import { LABELS, type SlipLabels } from "@/lib/labels";
@@ -49,6 +50,9 @@ import { cn } from "@/lib/utils";
 
 const LIVE_POLL_MS = 15_000;
 const IDLE_POLL_MS = 60_000;
+
+// From this width the full slip gets its own column beside the lanes; below it, it slides in over them.
+const DETAIL_COLUMN_QUERY = "(min-width: 1400px)";
 
 export function Board() {
   const [board, setBoard] = useState<BoardData | null>(null);
@@ -122,6 +126,17 @@ export function Board() {
   const requested = useSearchParams().get("day");
   const day = days.find((d) => d.key === requested) ?? (requested ? null : days[0]) ?? null;
 
+  // Lanes hold previews; one slip at a time is shown in full. With room for the detail column
+  // there is always something in it (a live slip if there is one); in the slide-over, only what
+  // was tapped.
+  const hasDetailColumn = useMediaQuery(DETAIL_COLUMN_QUERY);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const slips = day?.parlays ?? [];
+  const selected =
+    slips.find((p) => p.id === selectedId) ??
+    (hasDetailColumn ? (slips.find((p) => p.status === "live") ?? slips[0] ?? null) : null);
+  const actions: SlipActions = { onDelete: remove, onMarkLost: markLost, onSetStake: setStake };
+
   return (
     <SidebarProvider>
       <SidePanel board={board} days={days} activeKey={day?.key ?? null} />
@@ -136,8 +151,8 @@ export function Board() {
             {error ? `Couldn't load the board: ${error}` : "Loading the board…"}
           </p>
         ) : (
-          <section className="flex-1 px-5 py-20 xl:min-h-0 xl:pt-14 xl:pb-5">
-            <div className="mx-auto w-full max-w-[1320px] xl:flex xl:h-full xl:flex-col">
+          <section className="flex-1 px-5 py-20 xl:min-h-0 xl:pt-14 xl:pb-5 min-[1400px]:flex min-[1400px]:gap-5">
+            <div className="mx-auto w-full max-w-[1320px] xl:flex xl:h-full xl:flex-col min-[1400px]:min-w-0 min-[1400px]:flex-1">
               <h1 className="font-heading type-display sm:type-hero">{day ? `${day.label}.` : "Your parlays."}</h1>
 
               {problem && (
@@ -163,11 +178,35 @@ export function Board() {
                 </p>
               )}
 
-              {day && <Lanes parlays={day.parlays} onDelete={remove} onMarkLost={markLost} onSetStake={setStake} />}
+              {day && <Lanes parlays={slips} selectedId={selected?.id ?? null} onSelect={setSelectedId} />}
             </div>
+
+            {hasDetailColumn && day && (
+              <aside aria-label="Selected slip" className="h-full w-[26rem] shrink-0 rounded-xl bg-black/30 p-3">
+                {selected ? (
+                  <SlipDetail key={selected.id} parlay={selected} {...actions} />
+                ) : (
+                  <p className="grid h-full place-items-center rounded-xl border border-dashed type-caption text-muted-foreground">
+                    Select a slip to see its legs.
+                  </p>
+                )}
+              </aside>
+            )}
           </section>
         )}
       </SidebarInset>
+
+      {!hasDetailColumn && (
+        <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
+          <SheetContent side="right" className="gap-0 p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md">
+            <SheetHeader className="sr-only">
+              <SheetTitle>{selected?.name ?? "Slip"}</SheetTitle>
+              <SheetDescription>The slip&apos;s legs, wager and actions.</SheetDescription>
+            </SheetHeader>
+            {selected && <SlipDetail key={selected.id} parlay={selected} inSheet {...actions} />}
+          </SheetContent>
+        </Sheet>
+      )}
     </SidebarProvider>
   );
 }
@@ -248,7 +287,15 @@ type SlipActions = {
   onSetStake: (parlay: BoardParlay, stake: Stake) => void;
 };
 
-function Lanes({ parlays, onDelete, onMarkLost, onSetStake }: { parlays: BoardParlay[] } & SlipActions) {
+function Lanes({
+  parlays,
+  selectedId,
+  onSelect,
+}: {
+  parlays: BoardParlay[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
   return (
     <div className="mt-12 grid items-start gap-5 xl:mt-10 xl:min-h-0 xl:flex-1 xl:grid-cols-3 xl:grid-rows-[minmax(0,1fr)]">
       {LANES.map((lane) => {
@@ -264,9 +311,9 @@ function Lanes({ parlays, onDelete, onMarkLost, onSetStake }: { parlays: BoardPa
                 {lane.empty}
               </p>
             ) : (
-              <div data-slot="lane-body" className="grid gap-3 lg:grid-cols-2 xl:flex xl:min-h-0 xl:flex-col xl:overflow-y-auto xl:overscroll-contain">
+              <div data-slot="lane-body" className="grid gap-3 sm:grid-cols-2 xl:flex xl:min-h-0 xl:flex-col xl:overflow-y-auto xl:overscroll-contain">
                 {slips.map((parlay) => (
-                  <ParlayCard key={parlay.id} parlay={parlay} onDelete={onDelete} onMarkLost={onMarkLost} onSetStake={onSetStake} />
+                  <SlipPreview key={parlay.id} parlay={parlay} selected={parlay.id === selectedId} onSelect={() => onSelect(parlay.id)} />
                 ))}
               </div>
             )}
@@ -285,7 +332,17 @@ const PARLAY_BADGE: Record<ParlayStatus, { label: string; variant: "default" | "
   push: { label: "Push", variant: "secondary", className: "text-muted-foreground" },
 };
 
-const STATUS_DOT: Record<ParlayStatus, string> = {
+function StatusBadge({ parlay }: { parlay: BoardParlay }) {
+  const badge = PARLAY_BADGE[parlay.status];
+  return (
+    <Badge variant={badge.variant} className={badge.className}>
+      {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
+      {parlay.markedLost ? "Marked lost" : badge.label}
+    </Badge>
+  );
+}
+
+const PREVIEW_DOT: Record<ParlayStatus, string> = {
   pending: "bg-muted-foreground/50",
   live: "animate-pulse-soft bg-primary",
   won: "bg-hit",
@@ -293,101 +350,94 @@ const STATUS_DOT: Record<ParlayStatus, string> = {
   push: "bg-muted-foreground",
 };
 
-function ParlayCard({ parlay, onDelete, onMarkLost, onSetStake }: { parlay: BoardParlay } & SlipActions) {
-  const badge = PARLAY_BADGE[parlay.status];
+// What a slip looks like in a lane: enough to tell them apart and see how each is doing.
+// One mark per leg stands in for the legs themselves; the full slip opens beside the lanes.
+// There is no badge here because the lane already says which state the slip is in.
+function SlipPreview({ parlay, selected, onSelect }: { parlay: BoardParlay; selected: boolean; onSelect: () => void }) {
   const hits = parlay.legs.filter((l) => l.status === "hit").length;
-  const [collapsed, toggleCollapsed] = useCollapsed(parlay.id);
-  const statusLabel = parlay.markedLost ? "Marked lost" : badge.label;
+  // Pending and in-progress slips don't repeat their lane's name; a settled one says how it ended.
+  const outcome = parlay.markedLost
+    ? "Marked lost · "
+    : parlay.status === "pending" || parlay.status === "live"
+      ? ""
+      : `${PARLAY_BADGE[parlay.status].label} · `;
+  const stake =
+    parlay.wager !== null && parlay.payout !== null ? ` · ${formatMoney(parlay.wager)} pays ${formatMoney(parlay.payout)}` : "";
+
+  return (
+    <button
+      type="button"
+      data-slot="slip-preview"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cn(
+        "grid w-full shrink-0 cursor-pointer grid-cols-[minmax(0,1fr)] gap-2.5 border bg-card p-4 text-left transition-colors hover:bg-accent",
+        selected ? "border-primary" : "border-transparent",
+      )}
+    >
+      <span className="flex items-center justify-between gap-3">
+        <span className="min-w-0 truncate font-semibold leading-[1.24]">{parlay.name}</span>
+        <LabelMarks labels={parlay.labels} className="shrink-0 type-caption" />
+      </span>
+      <span className="flex flex-wrap gap-1">
+        {parlay.legs.map((leg) => (
+          <LegMark key={leg.id} status={leg.status} className="size-4" />
+        ))}
+      </span>
+      <span className="flex min-w-0 items-center gap-1.5 type-fine text-muted-foreground">
+        <span className={cn("size-1.5 shrink-0 rounded-full", PREVIEW_DOT[parlay.status])} />
+        <span className="truncate">
+          {outcome}
+          {hits} of {parlay.legs.length} hit
+          {stake}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+// The full slip: header, wager band and footer stay put while the legs scroll between them.
+function SlipDetail({ parlay, inSheet = false, onDelete, onMarkLost, onSetStake }: { parlay: BoardParlay; inSheet?: boolean } & SlipActions) {
+  const hits = parlay.legs.filter((l) => l.status === "hit").length;
   const [noteOpen, setNoteOpen] = useState(false);
   const [stakeOpen, setStakeOpen] = useState(false);
 
   return (
-    // In a lane, a slip shrinks to fit the space and scrolls its own legs, so the scrollbar stays
-    // between the header and footer. One-leg and collapsed slips never shrink; there is nothing to scroll.
-    <Card
-      className={cn(
-        "@container/slip gap-0 rounded-none border-0 pt-0",
-        collapsed ? "pb-0 xl:shrink-0" : parlay.legs.length <= 1 ? "xl:shrink-0" : "xl:min-h-80",
-      )}
-    >
-      {/* The whole header toggles the slip; the chevron is the control keyboards and screen readers use.
-          Collapsed, it becomes two tight lines: the name, then status and tally as plain text, so a
-          narrow card isn't sharing one row between a title, a tally, a badge and a button. */}
-      <CardHeader
-        onClick={toggleCollapsed}
-        className={cn(
-          "shrink-0 cursor-pointer rounded-none has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]",
-          collapsed ? "gap-0.5 py-4" : "border-b pt-(--card-spacing)",
-        )}
-      >
-        <CardTitle className={cn(collapsed && "truncate type-body font-semibold")}>{parlay.name}</CardTitle>
-        {collapsed ? (
-          <CardDescription className="flex items-center gap-1.5 truncate">
-            <span className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[parlay.status])} />
-            {statusLabel} · {hits} of {parlay.legs.length} legs hit
-            <LabelMarks labels={parlay.labels} className="ml-1" />
-          </CardDescription>
-        ) : (
-          // The badge and note get the card's full width on their own rows, so the name only
-          // shares its row with the chevron and neither has to wrap around the other.
-          <div className="col-span-2 mt-1.5 flex flex-col items-start gap-2">
-            <div className="flex items-center gap-2.5">
-              <Badge variant={badge.variant} className={badge.className}>
-                {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
-                {statusLabel}
-              </Badge>
-              {/* Who built the slip and whether it was really placed; clicking opens the editor. */}
-              {Object.values(parlay.labels).some(Boolean) && (
-                <button
-                  type="button"
-                  aria-label={`Edit labels for ${parlay.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setStakeOpen(true);
-                  }}
-                  className="cursor-pointer leading-none"
-                >
-                  <LabelMarks labels={parlay.labels} />
-                </button>
-              )}
-            </div>
-            {parlay.notes && (
-              // A one-line preview; the full note opens in a dialog. The click is kept from
-              // reaching the header so it doesn't also collapse the slip.
+    <Card data-slot="slip-detail" className="@container/slip h-full gap-0 rounded-none border-0 pt-0">
+      <CardHeader className="shrink-0 grid-cols-[minmax(0,1fr)] rounded-none border-b pt-(--card-spacing)">
+        {/* In the slide-over, the close button sits over the top-right corner. */}
+        <CardTitle className={cn(inSheet && "pr-10")}>{parlay.name}</CardTitle>
+        <div className="mt-1.5 flex min-w-0 flex-col items-start gap-2">
+          <div className="flex items-center gap-2.5">
+            <StatusBadge parlay={parlay} />
+            {/* Who built the slip and whether it was really placed; clicking opens the editor. */}
+            {Object.values(parlay.labels).some(Boolean) && (
               <button
                 type="button"
-                aria-haspopup="dialog"
-                aria-label={`Read the note for ${parlay.name}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setNoteOpen(true);
-                }}
-                className="w-full cursor-pointer truncate text-left type-caption text-muted-foreground transition-colors hover:text-foreground"
+                aria-label={`Edit labels for ${parlay.name}`}
+                onClick={() => setStakeOpen(true)}
+                className="cursor-pointer leading-none"
               >
-                {parlay.notes}
+                <LabelMarks labels={parlay.labels} />
               </button>
             )}
           </div>
-        )}
-        <CardAction className={cn("flex items-center", collapsed ? "self-center" : "row-span-1")}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-expanded={!collapsed}
-            aria-controls={`slip-body-${parlay.id}`}
-            aria-label={collapsed ? `Expand ${parlay.name}` : `Collapse ${parlay.name}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleCollapsed();
-            }}
-            className="-mr-2 text-muted-foreground aria-expanded:bg-transparent aria-expanded:text-muted-foreground hover:aria-expanded:bg-muted"
-          >
-            <ChevronDown className={cn("transition-transform", collapsed && "-rotate-90")} />
-          </Button>
-        </CardAction>
+          {parlay.notes && (
+            // A one-line preview; the full note opens in a dialog.
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-label={`Read the note for ${parlay.name}`}
+              onClick={() => setNoteOpen(true)}
+              className="w-full cursor-pointer truncate text-left type-caption text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {parlay.notes}
+            </button>
+          )}
+        </div>
       </CardHeader>
 
-      {!collapsed && <StakeStrip parlay={parlay} onEdit={() => setStakeOpen(true)} />}
+      <StakeStrip parlay={parlay} onEdit={() => setStakeOpen(true)} />
 
       {/* Mounted only while open, so its fields start from the slip's current values each time. */}
       {stakeOpen && (
@@ -401,22 +451,14 @@ function ParlayCard({ parlay, onDelete, onMarkLost, onSetStake }: { parlay: Boar
         />
       )}
 
-      {!collapsed && (
-        <CardContent
-          id={`slip-body-${parlay.id}`}
-          data-slot="slip-legs"
-          className="py-5 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain"
-        >
-          <ul className="divide-y">
-            {parlay.legs.map((leg) => (
-              <LegRow key={leg.id} leg={leg} />
-            ))}
-          </ul>
-        </CardContent>
-      )}
+      <CardContent data-slot="slip-legs" className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-5">
+        <ul className="divide-y">
+          {parlay.legs.map((leg) => (
+            <LegRow key={leg.id} leg={leg} />
+          ))}
+        </ul>
+      </CardContent>
 
-      {/* Rendered outside the header: events from a dialog bubble to its React parent, and the
-          header toggles on click. */}
       {parlay.notes && (
         <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
           <DialogContent>
@@ -428,7 +470,7 @@ function ParlayCard({ parlay, onDelete, onMarkLost, onSetStake }: { parlay: Boar
         </Dialog>
       )}
 
-      {!collapsed && <SlipFooter parlay={parlay} hits={hits} onDelete={onDelete} onMarkLost={onMarkLost} />}
+      <SlipFooter parlay={parlay} hits={hits} onDelete={onDelete} onMarkLost={onMarkLost} />
     </Card>
   );
 }
@@ -641,8 +683,8 @@ const LEG_FILL: Record<LegStatus, string> = {
 };
 
 // A leg shows one of three marks: hit, missed, or an empty circle for anything not yet decided.
-function LegMark({ status }: { status: LegStatus }) {
-  const className = "size-5 shrink-0";
+function LegMark({ status, className: size = "size-5" }: { status: LegStatus; className?: string }) {
+  const className = cn("shrink-0", size);
   if (status === "hit") return <CircleCheck role="img" aria-label="Hit" className={cn(className, "text-hit")} />;
   if (status === "lost") return <CircleX role="img" aria-label="Missed" className={cn(className, "text-miss")} />;
   const label = status === "live" ? "In progress" : status === "push" ? "Push" : "Pending";
