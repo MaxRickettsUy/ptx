@@ -88,12 +88,13 @@ export function Board() {
   // relevant one: today, else the next upcoming day, else the latest past day.
   const requested = useSearchParams().get("day");
   const day = days.find((d) => d.key === requested) ?? (requested ? null : days[0]) ?? null;
-  const open = day?.parlays.filter((p) => p.status === "pending" || p.status === "live").length ?? 0;
 
   return (
     <SidebarProvider>
       <SidePanel board={board} days={days} activeKey={day?.key ?? null} />
-      <SidebarInset>
+      {/* Once the lanes sit side by side the page itself stops scrolling and each lane scrolls instead.
+          Below that width they stack, where one page scroll is the only thing that makes sense. */}
+      <SidebarInset className="xl:h-svh xl:overflow-hidden">
         {/* On small screens the panel is a drawer, so it needs a way in now that there's no header. */}
         <SidebarTrigger className="fixed top-3 left-3 z-20 size-11 rounded-full bg-secondary/80 backdrop-blur-xl md:hidden" />
 
@@ -102,13 +103,13 @@ export function Board() {
             {error ? `Couldn't load the board: ${error}` : "Loading the board…"}
           </p>
         ) : (
-          <section className="flex-1 px-5 py-20">
-            <div className="mx-auto w-full max-w-[980px]">
+          <section className="flex-1 px-5 py-20 xl:min-h-0 xl:pt-14 xl:pb-5">
+            <div className="mx-auto w-full max-w-[1320px] xl:flex xl:h-full xl:flex-col">
               <header className="text-center">
                 <h1 className="font-heading type-display sm:type-hero">{day ? `${day.label}.` : "Your parlays."}</h1>
                 <p className="mt-3 type-tagline text-muted-foreground sm:type-lead">
                   {day
-                    ? `${open} open. ${day.parlays.length - open} settled.`
+                    ? `${day.parlays.length} ${day.parlays.length === 1 ? "slip" : "slips"}.`
                     : days.length === 0
                       ? "Nothing on the board yet."
                       : "No slips on that day."}
@@ -137,7 +138,7 @@ export function Board() {
                 </p>
               )}
 
-              {day && <Grid parlays={day.parlays} onDelete={remove} className="mt-12" />}
+              {day && <Lanes parlays={day.parlays} onDelete={remove} />}
             </div>
           </section>
         )}
@@ -207,12 +208,38 @@ function SidePanel({ board, days, activeKey }: { board: BoardData | null; days: 
   );
 }
 
-function Grid({ parlays, onDelete, className }: { parlays: BoardParlay[]; onDelete: (p: BoardParlay) => void; className?: string }) {
+const LANES: { title: string; empty: string; statuses: ParlayStatus[]; className?: string }[] = [
+  { title: "Pending", empty: "Nothing waiting to start.", statuses: ["pending"] },
+  // Stacked on a phone, the live lane goes first since it's the one being watched.
+  { title: "In progress", empty: "Nothing in play right now.", statuses: ["live"], className: "order-first xl:order-none" },
+  { title: "Settled", empty: "Nothing settled yet.", statuses: ["won", "lost", "push"] },
+];
+
+function Lanes({ parlays, onDelete }: { parlays: BoardParlay[]; onDelete: (p: BoardParlay) => void }) {
   return (
-    <div className={cn("grid items-start gap-6 md:grid-cols-2", parlays.length === 1 && "md:mx-auto md:max-w-[478px] md:grid-cols-1", className)}>
-      {parlays.map((parlay) => (
-        <ParlayCard key={parlay.id} parlay={parlay} onDelete={() => onDelete(parlay)} />
-      ))}
+    <div className="mt-12 grid items-start gap-5 xl:mt-10 xl:min-h-0 xl:flex-1 xl:grid-cols-3 xl:grid-rows-[minmax(0,1fr)]">
+      {LANES.map((lane) => {
+        const slips = parlays.filter((p) => lane.statuses.includes(p.status));
+        return (
+          <section key={lane.title} className={cn("rounded-xl bg-black/30 p-3 xl:flex xl:max-h-full xl:flex-col", lane.className)} aria-label={lane.title}>
+            <h2 className="flex shrink-0 items-baseline justify-between px-3 pt-2 pb-4 font-heading type-tagline font-semibold">
+              {lane.title}
+              <span className="type-caption font-normal text-muted-foreground tabular-nums">{slips.length}</span>
+            </h2>
+            {slips.length === 0 ? (
+              <p className="rounded-xl border border-dashed px-6 py-10 text-center type-caption text-muted-foreground">
+                {lane.empty}
+              </p>
+            ) : (
+              <div data-slot="lane-body" className="grid gap-3 md:grid-cols-2 xl:flex xl:min-h-0 xl:flex-col xl:overflow-y-auto xl:overscroll-contain">
+                {slips.map((parlay) => (
+                  <ParlayCard key={parlay.id} parlay={parlay} onDelete={() => onDelete(parlay)} />
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -230,8 +257,10 @@ function ParlayCard({ parlay, onDelete }: { parlay: BoardParlay; onDelete: () =>
   const hits = parlay.legs.filter((l) => l.status === "hit").length;
 
   return (
-    <Card>
-      <CardHeader>
+    // In a lane, a slip shrinks to fit the space and scrolls its own legs, so the scrollbar stays
+    // between the header and footer. One-leg slips never shrink; there is nothing worth scrolling.
+    <Card className={cn("gap-0 rounded-none pt-0", parlay.legs.length <= 1 ? "xl:shrink-0" : "xl:min-h-80")}>
+      <CardHeader className="shrink-0 rounded-none border-b pt-(--card-spacing)">
         <CardTitle>{parlay.name}</CardTitle>
         {parlay.notes && <CardDescription>{parlay.notes}</CardDescription>}
         <CardAction>
@@ -242,7 +271,7 @@ function ParlayCard({ parlay, onDelete }: { parlay: BoardParlay; onDelete: () =>
         </CardAction>
       </CardHeader>
 
-      <CardContent>
+      <CardContent data-slot="slip-legs" className="py-5 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
         <ul className="divide-y">
           {parlay.legs.map((leg) => (
             <LegRow key={leg.id} leg={leg} />
@@ -250,7 +279,7 @@ function ParlayCard({ parlay, onDelete }: { parlay: BoardParlay; onDelete: () =>
         </ul>
       </CardContent>
 
-      <CardFooter className="justify-between type-fine text-muted-foreground">
+      <CardFooter className="shrink-0 justify-between rounded-none type-fine text-muted-foreground">
         <span>
           {hits} of {parlay.legs.length} legs hit · Added{" "}
           {new Date(parlay.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
@@ -311,7 +340,7 @@ function LegRow({ leg }: { leg: BoardLeg }) {
           </p>
         </div>
         <div className="shrink-0 text-right">
-          <p className={cn("font-heading type-display tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
+          <p className={cn("font-heading type-lead font-semibold tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
             {started ? leg.value : "–"}
           </p>
           <p className={cn("type-fine font-semibold", tone.text)}>{tone.label}</p>
