@@ -53,7 +53,6 @@
   --radius-lg: 11px;
   --radius-xl: 18px;
 
-  --animate-rise: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-pulse-soft: pulse-soft 1.8s ease-in-out infinite;
 }
 
@@ -103,13 +102,6 @@
   font-size: 12px;
   line-height: 1.33;
   letter-spacing: -0.12px;
-}
-
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
 }
 
 @keyframes pulse-soft {

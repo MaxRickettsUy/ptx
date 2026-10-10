@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertDialog,
@@ -34,6 +36,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
+import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
 import { cn } from "@/lib/utils";
 
@@ -78,13 +81,18 @@ export function Board() {
     refresh();
   }
 
-  const open = board?.parlays.filter((p) => p.status === "pending" || p.status === "live") ?? [];
-  const settled = board?.parlays.filter((p) => p.status !== "pending" && p.status !== "live") ?? [];
   const problem = error ?? (board && board.problems.length > 0 ? board.problems.join(" ") : null);
+  const days = board ? groupByDay(board.parlays, new Date(board.fetchedAt)) : [];
+
+  // Each day is its own page at /?day=YYYY-MM-DD. With no day chosen, land on the most
+  // relevant one: today, else the next upcoming day, else the latest past day.
+  const requested = useSearchParams().get("day");
+  const day = days.find((d) => d.key === requested) ?? (requested ? null : days[0]) ?? null;
+  const open = day?.parlays.filter((p) => p.status === "pending" || p.status === "live").length ?? 0;
 
   return (
     <SidebarProvider>
-      <SidePanel board={board} open={open} settled={settled} />
+      <SidePanel board={board} days={days} activeKey={day?.key ?? null} />
       <SidebarInset>
         {/* On small screens the panel is a drawer, so it needs a way in now that there's no header. */}
         <SidebarTrigger className="fixed top-3 left-3 z-20 size-11 rounded-full bg-secondary/80 backdrop-blur-xl md:hidden" />
@@ -94,80 +102,75 @@ export function Board() {
             {error ? `Couldn't load the board: ${error}` : "Loading the board…"}
           </p>
         ) : (
-          <>
-            <section className="px-5 pt-20 pb-20">
-              <div className="mx-auto w-full max-w-[980px]">
-                <header className="text-center">
-                  <h1 className="font-heading type-display sm:type-hero">Your parlays.</h1>
-                  <p className="mt-3 type-tagline text-muted-foreground sm:type-lead">
-                    {board.parlays.length === 0
+          <section className="flex-1 px-5 py-20">
+            <div className="mx-auto w-full max-w-[980px]">
+              <header className="text-center">
+                <h1 className="font-heading type-display sm:type-hero">{day ? `${day.label}.` : "Your parlays."}</h1>
+                <p className="mt-3 type-tagline text-muted-foreground sm:type-lead">
+                  {day
+                    ? `${open} open. ${day.parlays.length - open} settled.`
+                    : days.length === 0
                       ? "Nothing on the board yet."
-                      : `${open.length} open. ${settled.length} settled.`}
-                  </p>
-                </header>
+                      : "No slips on that day."}
+                </p>
+              </header>
 
-                {problem && (
-                  <p className="mx-auto mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
-                    {problem}
-                  </p>
-                )}
+              {problem && (
+                <p className="mx-auto mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
+                  {problem}
+                </p>
+              )}
 
-                {board.parlays.length === 0 && (
-                  <p className="mx-auto mt-8 max-w-md text-center text-muted-foreground">
-                    Open Claude Code in this project and run{" "}
-                    <code className="rounded-xs bg-track px-1.5 py-0.5 font-mono type-caption text-foreground">/parlay</code>.
-                    Once you approve a slip it appears here and tracks itself.
-                  </p>
-                )}
+              {days.length === 0 && (
+                <p className="mx-auto mt-8 max-w-md text-center text-muted-foreground">
+                  Open Claude Code in this project and run{" "}
+                  <code className="rounded-xs bg-track px-1.5 py-0.5 font-mono type-caption text-foreground">/parlay</code>.
+                  Once you approve a slip it appears here and tracks itself.
+                </p>
+              )}
 
-                {open.length > 0 && <Grid parlays={open} onDelete={remove} className="mt-12" />}
-              </div>
-            </section>
+              {!day && days.length > 0 && (
+                <p className="mt-8 text-center">
+                  <Button variant="link" nativeButton={false} render={<Link href="/" />}>
+                    Show {days[0].label}
+                  </Button>
+                </p>
+              )}
 
-            {settled.length > 0 && (
-              // The settled band drops to true black; the colour change is the section divider.
-              <section className="flex-1 bg-black px-5 py-20">
-                <div className="mx-auto w-full max-w-[980px]">
-                  <h2 className="text-center font-heading type-display">Settled.</h2>
-                  <Grid parlays={settled} onDelete={remove} className="mt-12" />
-                </div>
-              </section>
-            )}
-          </>
+              {day && <Grid parlays={day.parlays} onDelete={remove} className="mt-12" />}
+            </div>
+          </section>
         )}
       </SidebarInset>
     </SidebarProvider>
   );
 }
 
-const DOT: Record<ParlayStatus, string> = {
-  pending: "bg-muted-foreground/50",
-  live: "animate-pulse-soft bg-primary",
-  won: "bg-hit",
-  lost: "bg-miss",
-  push: "bg-muted-foreground",
-};
-
-function SidePanel({ board, open, settled }: { board: BoardData | null; open: BoardParlay[]; settled: BoardParlay[] }) {
+function SidePanel({ board, days, activeKey }: { board: BoardData | null; days: DayGroup[]; activeKey: string | null }) {
   const { setOpenMobile } = useSidebar();
 
-  const group = (label: string, parlays: BoardParlay[]) =>
-    parlays.length > 0 && (
+  const group = (label: string, list: DayGroup[]) =>
+    list.length > 0 && (
       <SidebarGroup>
         <SidebarGroupLabel>{label}</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
-            {parlays.map((parlay) => (
-              <SidebarMenuItem key={parlay.id}>
-                <SidebarMenuButton render={<a href={`#slip-${parlay.id}`} />} onClick={() => setOpenMobile(false)}>
-                  <span className={cn("size-1.5 shrink-0 rounded-full", DOT[parlay.status])} />
-                  <span className="truncate">{parlay.name}</span>
-                </SidebarMenuButton>
-                <SidebarMenuBadge className="text-muted-foreground">
-                  {parlay.legs.filter((l) => l.status === "hit").length}/{parlay.legs.length}
-                </SidebarMenuBadge>
-              </SidebarMenuItem>
-            ))}
+            {list.map((day) => {
+              const live = day.parlays.some((p) => p.status === "live");
+              return (
+                <SidebarMenuItem key={day.key}>
+                  <SidebarMenuButton
+                    isActive={day.key === activeKey}
+                    render={<Link href={`/?day=${day.key}`} />}
+                    onClick={() => setOpenMobile(false)}
+                  >
+                    <span className={cn("size-1.5 shrink-0 rounded-full", live ? "animate-pulse-soft bg-primary" : "bg-transparent")} />
+                    <span className="truncate">{day.label}</span>
+                  </SidebarMenuButton>
+                  <SidebarMenuBadge className="text-muted-foreground">{day.parlays.length}</SidebarMenuBadge>
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
@@ -192,8 +195,8 @@ function SidePanel({ board, open, settled }: { board: BoardData | null; open: Bo
         </p>
       </SidebarHeader>
       <SidebarContent>
-        {group("Open", open)}
-        {group("Settled", settled)}
+        {group("Upcoming", days.filter((d) => !d.past))}
+        {group("Earlier", days.filter((d) => d.past))}
       </SidebarContent>
       <SidebarFooter className="px-4 pb-5 type-fine text-muted-foreground">
         <p>
@@ -207,8 +210,8 @@ function SidePanel({ board, open, settled }: { board: BoardData | null; open: Bo
 function Grid({ parlays, onDelete, className }: { parlays: BoardParlay[]; onDelete: (p: BoardParlay) => void; className?: string }) {
   return (
     <div className={cn("grid items-start gap-6 md:grid-cols-2", parlays.length === 1 && "md:mx-auto md:max-w-[478px] md:grid-cols-1", className)}>
-      {parlays.map((parlay, i) => (
-        <ParlayCard key={parlay.id} parlay={parlay} index={i} onDelete={() => onDelete(parlay)} />
+      {parlays.map((parlay) => (
+        <ParlayCard key={parlay.id} parlay={parlay} onDelete={() => onDelete(parlay)} />
       ))}
     </div>
   );
@@ -222,12 +225,12 @@ const PARLAY_BADGE: Record<ParlayStatus, { label: string; variant: "default" | "
   push: { label: "Push", variant: "secondary", className: "text-muted-foreground" },
 };
 
-function ParlayCard({ parlay, index, onDelete }: { parlay: BoardParlay; index: number; onDelete: () => void }) {
+function ParlayCard({ parlay, onDelete }: { parlay: BoardParlay; onDelete: () => void }) {
   const badge = PARLAY_BADGE[parlay.status];
   const hits = parlay.legs.filter((l) => l.status === "hit").length;
 
   return (
-    <Card id={`slip-${parlay.id}`} className="animate-rise scroll-mt-6" style={{ animationDelay: `${index * 60}ms` }}>
+    <Card>
       <CardHeader>
         <CardTitle>{parlay.name}</CardTitle>
         {parlay.notes && <CardDescription>{parlay.notes}</CardDescription>}
