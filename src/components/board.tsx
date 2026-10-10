@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useStoredFlag } from "@/hooks/use-stored-flag";
 import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
 import { LABELS, type SlipLabels } from "@/lib/labels";
@@ -130,6 +131,8 @@ export function Board() {
   // there is always something in it (a live slip if there is one); in the slide-over, only what
   // was tapped.
   const hasDetailColumn = useMediaQuery(DETAIL_COLUMN_QUERY);
+  // Whether the left panel is showing on desktop; remembered across reloads.
+  const [panelOpen, setPanelOpen] = useStoredFlag("parlay-board:side-panel-open", true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const slips = day?.parlays ?? [];
   const selected =
@@ -138,13 +141,11 @@ export function Board() {
   const actions: SlipActions = { onDelete: remove, onMarkLost: markLost, onSetStake: setStake };
 
   return (
-    <SidebarProvider>
+    <SidebarProvider open={panelOpen} onOpenChange={setPanelOpen}>
       <SidePanel board={board} days={days} activeKey={day?.key ?? null} />
       {/* Once the lanes sit side by side the page itself stops scrolling and each lane scrolls instead.
           Below that width they stack, where one page scroll is the only thing that makes sense. */}
       <SidebarInset className="xl:h-svh xl:overflow-hidden">
-        {/* On small screens the panel is a drawer, so it needs a way in now that there's no header. */}
-        <SidebarTrigger className="fixed top-3 left-3 z-20 size-11 rounded-full bg-secondary/80 backdrop-blur-xl md:hidden" />
 
         {!board ? (
           <p className="py-32 text-center type-caption text-muted-foreground">
@@ -153,7 +154,12 @@ export function Board() {
         ) : (
           <section className="flex-1 px-5 py-20 xl:min-h-0 xl:pt-14 xl:pb-5 min-[1400px]:flex min-[1400px]:gap-5">
             <div className="mx-auto w-full max-w-[1320px] xl:flex xl:h-full xl:flex-col min-[1400px]:min-w-0 min-[1400px]:flex-1">
-              <h1 className="font-heading type-display sm:type-hero">{day ? `${day.label}.` : "Your parlays."}</h1>
+              {/* The button beside the title shows and hides the left panel: a drawer on a phone,
+                  a collapsing column on desktop. It lives here because there is no header bar. */}
+              <div className="flex items-center gap-3">
+                <SidebarTrigger className="size-11 shrink-0 rounded-full bg-secondary/80 text-muted-foreground" />
+                <h1 className="min-w-0 font-heading type-display sm:type-hero">{day ? `${day.label}.` : "Your parlays."}</h1>
+              </div>
 
               {problem && (
                 <p className="mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
@@ -354,15 +360,16 @@ const PREVIEW_DOT: Record<ParlayStatus, string> = {
 // One mark per leg stands in for the legs themselves; the full slip opens beside the lanes.
 // There is no badge here because the lane already says which state the slip is in.
 function SlipPreview({ parlay, selected, onSelect }: { parlay: BoardParlay; selected: boolean; onSelect: () => void }) {
-  const hits = parlay.legs.filter((l) => l.status === "hit").length;
   // Pending and in-progress slips don't repeat their lane's name; a settled one says how it ended.
+  // The leg marks above already show how many legs have hit, so the line is just this and the wager.
   const outcome = parlay.markedLost
-    ? "Marked lost · "
+    ? "Marked lost"
     : parlay.status === "pending" || parlay.status === "live"
-      ? ""
-      : `${PARLAY_BADGE[parlay.status].label} · `;
+      ? null
+      : PARLAY_BADGE[parlay.status].label;
   const stake =
-    parlay.wager !== null && parlay.payout !== null ? ` · ${formatMoney(parlay.wager)} pays ${formatMoney(parlay.payout)}` : "";
+    parlay.wager !== null && parlay.payout !== null ? `${formatMoney(parlay.wager)} pays ${formatMoney(parlay.payout)}` : null;
+  const summary = [outcome, stake].filter(Boolean).join(" · ");
 
   return (
     <button
@@ -376,22 +383,20 @@ function SlipPreview({ parlay, selected, onSelect }: { parlay: BoardParlay; sele
       )}
     >
       <span className="flex items-center justify-between gap-3">
-        <span className="min-w-0 truncate font-semibold leading-[1.24]">{parlay.name}</span>
-        <LabelMarks labels={parlay.labels} className="shrink-0 type-caption" />
+        <span className="min-w-0 truncate type-caption font-semibold">{parlay.name}</span>
+        <LabelMarks labels={parlay.labels} className="shrink-0 type-fine" />
       </span>
       <span className="flex flex-wrap gap-1">
         {parlay.legs.map((leg) => (
           <LegMark key={leg.id} status={leg.status} className="size-4" />
         ))}
       </span>
-      <span className="flex min-w-0 items-center gap-1.5 type-fine text-muted-foreground">
-        <span className={cn("size-1.5 shrink-0 rounded-full", PREVIEW_DOT[parlay.status])} />
-        <span className="truncate">
-          {outcome}
-          {hits} of {parlay.legs.length} hit
-          {stake}
+      {summary && (
+        <span className="flex min-w-0 items-center gap-1.5 type-fine text-muted-foreground">
+          <span className={cn("size-1.5 shrink-0 rounded-full", PREVIEW_DOT[parlay.status])} />
+          <span className="truncate">{summary}</span>
         </span>
-      </span>
+      )}
     </button>
   );
 }
