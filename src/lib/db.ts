@@ -44,6 +44,10 @@ export type ParlayRow = {
   result: "won" | "lost" | "push" | null;
   settled_at: string | null;
   marked_lost_at: string | null;
+  wager: number | null;
+  odds: number | null;
+  multiplier: number | null;
+  payout: number | null;
   created_at: string;
   legs: LegRow[];
 };
@@ -61,14 +65,17 @@ export async function listParlays(): Promise<ParlayRow[]> {
   return (data ?? []) as unknown as ParlayRow[];
 }
 
+export type Stake = { wager: number | null; odds: number | null; multiplier: number | null; payout: number | null };
+
 export async function createParlay(input: {
   name: string;
   notes: string | null;
   legs: NewLeg[];
+  stake?: Stake;
 }): Promise<string> {
   const { data, error } = await db()
     .from("parlays")
-    .insert({ name: input.name, notes: input.notes })
+    .insert({ name: input.name, notes: input.notes, ...input.stake })
     .select("id")
     .single();
   if (error) throw new Error(error.message);
@@ -86,6 +93,11 @@ export async function createParlay(input: {
 
 export async function deleteParlay(id: string): Promise<void> {
   const { error } = await db().from("parlays").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function setStake(id: string, stake: Stake): Promise<void> {
+  const { error } = await db().from("parlays").update(stake).eq("id", id);
   if (error) throw new Error(error.message);
 }
 

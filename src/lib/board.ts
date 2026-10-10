@@ -2,13 +2,15 @@ import "server-only";
 
 import { listParlays, settleLeg, settleParlay, type LegRow } from "./db";
 import { demoGameStats, isDemoEvent } from "./demo";
-import { getGameStats, getScoreboard, type Game, type GameStats } from "./espn";
+import { getGameStats, getScoreboard, headshotUrl, type Game, type GameStats } from "./espn";
 import { gradeLeg, gradeParlay, type Direction, type GameState, type LegStatus, type ParlayStatus } from "./grade";
+import { impliedPayout } from "./odds";
 import { EMPTY_LINE, STATS, isStatKey } from "./stats";
 
 export type BoardLeg = {
   id: string;
   playerName: string;
+  headshot: string | null;
   team: string | null;
   position: string | null;
   statShort: string;
@@ -33,6 +35,14 @@ export type BoardParlay = {
   createdAt: string;
   /** True when the user wrote this slip off by hand rather than the box score deciding it. */
   markedLost: boolean;
+  wager: number | null;
+  odds: number | null;
+  /** Payout multiple (1.9x), for books that price that way. A slip has odds or a multiplier, not both. */
+  multiplier: number | null;
+  /** Total returned on a win. The book's own figure if one was saved, otherwise worked out from the odds. */
+  payout: number | null;
+  /** True when the payout was entered by hand rather than derived from the wager and price. */
+  payoutEntered: boolean;
   status: ParlayStatus;
   legs: BoardLeg[];
 };
@@ -87,6 +97,7 @@ export async function getBoard(): Promise<Board> {
       const base = {
         id: leg.id,
         playerName: leg.player_name,
+        headshot: headshotUrl(leg.athlete_id),
         team: leg.team_abbr,
         position: leg.player_position,
         statShort: def?.short ?? leg.stat,
@@ -141,12 +152,27 @@ export async function getBoard(): Promise<Board> {
       writes.push(settleParlay(parlay.id, graded).catch((error) => void problems.push(`Could not settle parlay: ${error.message}`)));
     }
 
+    // numeric columns come back from PostgREST as numbers, but guard against strings anyway.
+    const wager = parlay.wager === null ? null : Number(parlay.wager);
+    const multiplier = parlay.multiplier === null ? null : Number(parlay.multiplier);
+    const payout =
+      parlay.payout !== null
+        ? Number(parlay.payout)
+        : wager !== null
+          ? impliedPayout(wager, { odds: parlay.odds, multiplier })
+          : null;
+
     return {
       id: parlay.id,
       name: parlay.name,
       notes: parlay.notes,
       createdAt: parlay.created_at,
       markedLost,
+      wager,
+      odds: parlay.odds,
+      multiplier,
+      payout,
+      payoutEntered: parlay.payout !== null,
       status,
       legs,
     };

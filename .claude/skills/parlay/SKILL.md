@@ -29,6 +29,8 @@ Only the markets listed in the `save_parlay` tool can be tracked, so only propos
 
 Before calling `save_parlay`, show the final slip and get a clear yes. Saving is what puts it on the live board, so don't save a draft the user is still adjusting. Use the athlete ids and event ids exactly as the tools returned them, because the tracker matches box-score rows by those ids.
 
+Once the legs are settled, ask how much they're staking and what price the book is showing for the whole parlay. Pass the stake as `wager`. Pass the price as `odds` if it's American (+450 is `450`), or as `multiplier` if the book shows a multiple, as Underdog does (1.9x is `1.9`). Use whichever form the user gives and don't convert between them; never pass both. The board works the payout out from those. Only pass `payout` if the book's figure is different, as with a boost. All of these are optional: if the user doesn't want to give them, save without.
+
 Put the idea behind the parlay in `notes` in a sentence or two. The conversation isn't stored with the slip, so that note is the only record of why it was built.
 
 If `save_parlay` returns `saved: false`, fix the listed problems and try again. If it fails with a connection error, the local database is probably down: tell the user to run `supabase start` in the project.

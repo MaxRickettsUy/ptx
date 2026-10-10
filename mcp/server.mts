@@ -111,6 +111,23 @@ server.registerTool(
     inputSchema: {
       name: z.string().describe("Short name for the slip, e.g. 'SNF Ravens stack'"),
       notes: z.string().optional().describe("One or two sentences on the idea behind the parlay; shown on the board"),
+      wager: z.number().nonnegative().optional().describe("Stake in dollars, if the user gave one"),
+      odds: z
+        .number()
+        .int()
+        .refine((n) => n >= 100 || n <= -100, "American odds are +100 or higher, or -100 or lower")
+        .optional()
+        .describe("The whole parlay's American odds as the sportsbook shows them, e.g. 450 for +450 or -120. Leave out if the book shows a multiple instead."),
+      multiplier: z
+        .number()
+        .gt(1)
+        .optional()
+        .describe("Payout multiple, for books such as Underdog that show 1.9x or 6x instead of American odds. Pass 1.9 for 1.9x. Never pass both this and odds."),
+      payout: z
+        .number()
+        .nonnegative()
+        .optional()
+        .describe("Total payout the book shows, stake included. Only pass it if it differs from what the odds imply, such as a boost."),
       legs: z
         .array(
           z.object({
@@ -127,9 +144,12 @@ server.registerTool(
         .max(15),
     },
   },
-  ({ name, notes, legs }) =>
+  ({ name, notes, wager, odds, multiplier, payout, legs }) =>
     respond(async () => {
       const problems: string[] = [];
+      if (odds !== undefined && multiplier !== undefined) {
+        return { saved: false, problems: ["Pass either odds or multiplier for the slip, not both."] };
+      }
       const resolved = await Promise.all(
         legs.map(async (leg) => {
           const game = await findGame(leg.event_id).catch(() => null);
@@ -166,7 +186,12 @@ server.registerTool(
       const valid = resolved.filter((leg) => leg !== null);
       if (problems.length > 0) return { saved: false, problems };
 
-      const parlayId = await createParlay({ name, notes: notes ?? null, legs: valid });
+      const parlayId = await createParlay({
+        name,
+        notes: notes ?? null,
+        legs: valid,
+        stake: { wager: wager ?? null, odds: odds ?? null, multiplier: multiplier ?? null, payout: payout ?? null },
+      });
       return { saved: true, parlay_id: parlayId, board_url: BOARD_URL, legs: valid };
     }),
 );

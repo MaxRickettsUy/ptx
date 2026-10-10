@@ -81,6 +81,12 @@ function toGame(competition: any, week: number | null): Game {
   };
 }
 
+/** Square headshot from ESPN's image CDN, or null for ids that aren't real ESPN athletes. */
+export function headshotUrl(athleteId: string, size = 96): string | null {
+  if (!/^\d+$/.test(athleteId)) return null;
+  return `https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/${athleteId}.png&w=${size}&h=${size}&scale=crop`;
+}
+
 export async function getScoreboard(week?: number): Promise<{ week: number; games: Game[] }> {
   const query = week ? `?seasontype=2&week=${week}` : "";
   return cached(`scoreboard:${week ?? "current"}`, 15 * SECOND, async () => {

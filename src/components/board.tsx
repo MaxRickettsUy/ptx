@@ -15,8 +15,11 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -40,6 +43,7 @@ import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
 import { useCollapsed } from "@/hooks/use-collapsed";
 import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
+import { formatMoney, formatPrice, impliedPayout, parsePrice } from "@/lib/odds";
 import { cn } from "@/lib/utils";
 
 const LIVE_POLL_MS = 15_000;
@@ -82,6 +86,19 @@ export function Board() {
     });
     if (!res.ok) {
       setError("Couldn't update that slip.");
+      return;
+    }
+    refresh();
+  }
+
+  async function setStake(parlay: BoardParlay, stake: Stake) {
+    const res = await fetch(`/api/parlays/${parlay.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(stake),
+    });
+    if (!res.ok) {
+      setError((await res.json().catch(() => null))?.error ?? "Couldn't save the wager.");
       return;
     }
     refresh();
@@ -145,7 +162,7 @@ export function Board() {
                 </p>
               )}
 
-              {day && <Lanes parlays={day.parlays} onDelete={remove} onMarkLost={markLost} />}
+              {day && <Lanes parlays={day.parlays} onDelete={remove} onMarkLost={markLost} onSetStake={setStake} />}
             </div>
           </section>
         )}
@@ -222,12 +239,15 @@ const LANES: { title: string; empty: string; statuses: ParlayStatus[]; className
   { title: "Settled", empty: "Nothing settled yet.", statuses: ["won", "lost", "push"] },
 ];
 
+type Stake = { wager: number | null; odds: number | null; multiplier: number | null; payout: number | null };
+
 type SlipActions = {
   onDelete: (parlay: BoardParlay) => void;
   onMarkLost: (parlay: BoardParlay, markedLost: boolean) => void;
+  onSetStake: (parlay: BoardParlay, stake: Stake) => void;
 };
 
-function Lanes({ parlays, onDelete, onMarkLost }: { parlays: BoardParlay[] } & SlipActions) {
+function Lanes({ parlays, onDelete, onMarkLost, onSetStake }: { parlays: BoardParlay[] } & SlipActions) {
   return (
     <div className="mt-12 grid items-start gap-5 xl:mt-10 xl:min-h-0 xl:flex-1 xl:grid-cols-3 xl:grid-rows-[minmax(0,1fr)]">
       {LANES.map((lane) => {
@@ -245,7 +265,7 @@ function Lanes({ parlays, onDelete, onMarkLost }: { parlays: BoardParlay[] } & S
             ) : (
               <div data-slot="lane-body" className="grid gap-3 lg:grid-cols-2 xl:flex xl:min-h-0 xl:flex-col xl:overflow-y-auto xl:overscroll-contain">
                 {slips.map((parlay) => (
-                  <ParlayCard key={parlay.id} parlay={parlay} onDelete={onDelete} onMarkLost={onMarkLost} />
+                  <ParlayCard key={parlay.id} parlay={parlay} onDelete={onDelete} onMarkLost={onMarkLost} onSetStake={onSetStake} />
                 ))}
               </div>
             )}
@@ -272,11 +292,13 @@ const STATUS_DOT: Record<ParlayStatus, string> = {
   push: "bg-muted-foreground",
 };
 
-function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & SlipActions) {
+function ParlayCard({ parlay, onDelete, onMarkLost, onSetStake }: { parlay: BoardParlay } & SlipActions) {
   const badge = PARLAY_BADGE[parlay.status];
   const hits = parlay.legs.filter((l) => l.status === "hit").length;
   const [collapsed, toggleCollapsed] = useCollapsed(parlay.id);
   const statusLabel = parlay.markedLost ? "Marked lost" : badge.label;
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [stakeOpen, setStakeOpen] = useState(false);
 
   return (
     // In a lane, a slip shrinks to fit the space and scrolls its own legs, so the scrollbar stays
@@ -311,7 +333,22 @@ function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & 
               {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
               {statusLabel}
             </Badge>
-            {parlay.notes && <CardDescription>{parlay.notes}</CardDescription>}
+            {parlay.notes && (
+              // A one-line preview; the full note opens in a dialog. The click is kept from
+              // reaching the header so it doesn't also collapse the slip.
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                aria-label={`Read the note for ${parlay.name}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setNoteOpen(true);
+                }}
+                className="w-full cursor-pointer truncate text-left type-caption text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {parlay.notes}
+              </button>
+            )}
           </div>
         )}
         <CardAction className={cn("flex items-center", collapsed ? "self-center" : "row-span-1")}>
@@ -332,6 +369,20 @@ function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & 
         </CardAction>
       </CardHeader>
 
+      {!collapsed && <StakeStrip parlay={parlay} onEdit={() => setStakeOpen(true)} />}
+
+      {/* Mounted only while open, so its fields start from the slip's current values each time. */}
+      {stakeOpen && (
+        <StakeDialog
+          parlay={parlay}
+          onClose={() => setStakeOpen(false)}
+          onSave={(stake) => {
+            onSetStake(parlay, stake);
+            setStakeOpen(false);
+          }}
+        />
+      )}
+
       {!collapsed && (
         <CardContent
           id={`slip-body-${parlay.id}`}
@@ -346,12 +397,135 @@ function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & 
         </CardContent>
       )}
 
+      {/* Rendered outside the header: events from a dialog bubble to its React parent, and the
+          header toggles on click. */}
+      {parlay.notes && (
+        <Dialog open={noteOpen} onOpenChange={setNoteOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{parlay.name}</DialogTitle>
+              <DialogDescription className="whitespace-pre-wrap">{parlay.notes}</DialogDescription>
+            </DialogHeader>
+          </DialogContent>
+        </Dialog>
+      )}
+
       {!collapsed && <SlipFooter parlay={parlay} hits={hits} onDelete={onDelete} onMarkLost={onMarkLost} />}
     </Card>
   );
 }
 
-function SlipFooter({ parlay, hits, onDelete, onMarkLost }: { parlay: BoardParlay; hits: number } & SlipActions) {
+// Wager, odds and payout in a fixed band under the header. The whole band opens the editor.
+function StakeStrip({ parlay, onEdit }: { parlay: BoardParlay; onEdit: () => void }) {
+  const { wager, payout } = parlay;
+  const price = formatPrice(parlay);
+  const band = "shrink-0 cursor-pointer border-b px-(--card-spacing) py-3 text-left transition-colors hover:bg-muted/40";
+
+  if (wager === null && price === null && payout === null) {
+    return (
+      <button type="button" onClick={onEdit} className={cn(band, "type-caption text-primary")}>
+        Add wager and odds
+      </button>
+    );
+  }
+
+  const cells = [
+    { label: "Wager", value: wager === null ? "–" : formatMoney(wager) },
+    { label: "Odds", value: price ?? "–" },
+    {
+      label: "Payout",
+      value: payout === null ? "–" : formatMoney(payout),
+      // A won slip's payout is real money; a lost one's never arrives.
+      className: parlay.status === "won" ? "text-hit" : parlay.status === "lost" ? "text-muted-foreground line-through" : undefined,
+    },
+  ];
+
+  return (
+    <button type="button" onClick={onEdit} aria-label={`Edit wager and odds for ${parlay.name}`} className={cn(band, "grid grid-cols-3 gap-3")}>
+      {cells.map((cell) => (
+        <span key={cell.label} className="min-w-0">
+          <span className="block type-fine text-muted-foreground">{cell.label}</span>
+          <span className={cn("block truncate font-semibold tabular-nums", cell.className)}>{cell.value}</span>
+        </span>
+      ))}
+    </button>
+  );
+}
+
+function StakeDialog({ parlay, onClose, onSave }: { parlay: BoardParlay; onClose: () => void; onSave: (stake: Stake) => void }) {
+  const [wager, setWager] = useState(parlay.wager === null ? "" : String(parlay.wager));
+  const [price, setPrice] = useState(formatPrice(parlay) ?? "");
+  // Only a payout the user typed is shown; a worked-out one appears as the placeholder instead.
+  const [payout, setPayout] = useState(parlay.payoutEntered && parlay.payout !== null ? String(parlay.payout) : "");
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const amount = (text: string) => (text.trim() === "" ? null : Number(text.replace(/[$,\s]/g, "")));
+  const wagerValue = amount(wager);
+  const priceValue = parsePrice(price);
+  const payoutValue = amount(payout);
+  const implied =
+    wagerValue !== null && Number.isFinite(wagerValue) && priceValue !== null && priceValue !== "invalid"
+      ? impliedPayout(wagerValue, priceValue)
+      : null;
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const badAmount = (value: number | null) => value !== null && !(Number.isFinite(value) && value >= 0);
+    if (badAmount(wagerValue)) return setProblem("Wager should be an amount, like 10 or 12.50.");
+    if (priceValue === "invalid") return setProblem("Odds should be American odds like +450 or -120, or a multiple like 1.9x.");
+    if (badAmount(payoutValue)) return setProblem("Payout should be an amount, like 55.");
+    onSave({ wager: wagerValue, odds: priceValue?.odds ?? null, multiplier: priceValue?.multiplier ?? null, payout: payoutValue });
+  }
+
+  const field = "grid gap-1.5 type-caption text-muted-foreground";
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <form onSubmit={submit} className="grid gap-4">
+          <DialogHeader>
+            <DialogTitle>Wager and odds</DialogTitle>
+            <DialogDescription className="type-caption">{parlay.name}</DialogDescription>
+          </DialogHeader>
+          <label className={field}>
+            Wager
+            <Input inputMode="decimal" placeholder="10" value={wager} onChange={(e) => setWager(e.target.value)} />
+          </label>
+          <label className={field}>
+            Odds or multiple
+            <Input inputMode="text" placeholder="+450 or 1.9x" value={price} onChange={(e) => setPrice(e.target.value)} />
+          </label>
+          <label className={field}>
+            Payout
+            <Input
+              inputMode="decimal"
+              placeholder={implied === null ? "Worked out from wager and odds" : `${implied} from the odds`}
+              value={payout}
+              onChange={(e) => setPayout(e.target.value)}
+            />
+            <span className="type-fine">Total returned on a win, stake included. Leave blank unless your book shows a different figure.</span>
+          </label>
+          {problem && <p className="type-caption text-destructive">{problem}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm">
+              Save
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SlipFooter({
+  parlay,
+  hits,
+  onDelete,
+  onMarkLost,
+}: { parlay: BoardParlay; hits: number } & Pick<SlipActions, "onDelete" | "onMarkLost">) {
   const linkClass = "h-auto px-0 type-fine";
   return (
     <CardFooter className="shrink-0 justify-between gap-4 rounded-none type-fine text-muted-foreground">
@@ -406,11 +580,16 @@ const LEG_FILL: Record<LegStatus, string> = {
 
 // A leg shows one of three marks: hit, missed, or an empty circle for anything not yet decided.
 function LegMark({ status }: { status: LegStatus }) {
-  const className = "mt-px size-5 shrink-0";
+  const className = "size-5 shrink-0";
   if (status === "hit") return <CircleCheck role="img" aria-label="Hit" className={cn(className, "text-hit")} />;
   if (status === "lost") return <CircleX role="img" aria-label="Missed" className={cn(className, "text-miss")} />;
   const label = status === "live" ? "In progress" : status === "push" ? "Push" : "Pending";
   return <Circle role="img" aria-label={label} className={cn(className, "text-muted-foreground/60")} />;
+}
+
+function initials(name: string): string {
+  const parts = name.split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
 // "Rush + rec TDs" should keep its capitals mid-sentence, so only the first letter drops.
@@ -431,20 +610,25 @@ function LegRow({ leg }: { leg: BoardLeg }) {
 
   return (
     <li className="py-5 first:pt-0 last:pb-0">
-      <div className="flex items-start gap-2.5">
+      {/* One row for who and how many; the bet itself gets the full width underneath, since
+          beside a photo on a narrow card it wrapped to three or four lines. */}
+      <div className="flex items-center gap-2.5">
         <LegMark status={leg.status} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-semibold leading-[1.24]">{leg.playerName}</p>
-          <p className="mt-1 type-caption text-muted-foreground">
-            <span className="capitalize">{leg.direction}</span> {leg.line} {lowerFirst(leg.statLabel)}
-            <span className="mx-1.5">·</span>
-            {[leg.position, leg.team].filter(Boolean).join(", ")}
-          </p>
-        </div>
+        {/* The fallback covers players with no photo on file, and the simulated game's made-up ones. */}
+        <Avatar className="bg-muted">
+          {leg.headshot && <AvatarImage src={leg.headshot} alt="" />}
+          <AvatarFallback className="type-fine font-semibold">{initials(leg.playerName)}</AvatarFallback>
+        </Avatar>
+        <p className="min-w-0 flex-1 truncate font-semibold leading-[1.24]">{leg.playerName}</p>
         <p className={cn("shrink-0 font-heading type-lead font-semibold tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
           {started ? leg.value : "–"}
         </p>
       </div>
+      <p className="mt-2 type-caption text-muted-foreground">
+        <span className="capitalize">{leg.direction}</span> {leg.line} {lowerFirst(leg.statLabel)}
+        <span className="mx-1.5">·</span>
+        {[leg.position, leg.team].filter(Boolean).join(", ")}
+      </p>
 
       <div className="relative mt-3">
         <Progress

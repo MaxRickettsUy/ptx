@@ -104,28 +104,40 @@ export type Database = {
           created_at: string
           id: string
           marked_lost_at: string | null
+          multiplier: number | null
           name: string
           notes: string | null
+          odds: number | null
+          payout: number | null
           result: string | null
           settled_at: string | null
+          wager: number | null
         }
         Insert: {
           created_at?: string
           id?: string
           marked_lost_at?: string | null
+          multiplier?: number | null
           name: string
           notes?: string | null
+          odds?: number | null
+          payout?: number | null
           result?: string | null
           settled_at?: string | null
+          wager?: number | null
         }
         Update: {
           created_at?: string
           id?: string
           marked_lost_at?: string | null
+          multiplier?: number | null
           name?: string
           notes?: string | null
+          odds?: number | null
+          payout?: number | null
           result?: string | null
           settled_at?: string | null
+          wager?: number | null
         }
         Relationships: []
       }
