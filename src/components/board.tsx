@@ -1,5 +1,6 @@
 "use client";
 
+import { Circle, CircleCheck, CircleX } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -304,13 +305,22 @@ function ParlayCard({ parlay, onDelete }: { parlay: BoardParlay; onDelete: () =>
   );
 }
 
-const LEG_TONE: Record<LegStatus, { text: string; fill: string; label: string }> = {
-  pending: { text: "text-muted-foreground", fill: "bg-muted-foreground", label: "Pending" },
-  live: { text: "text-primary", fill: "bg-primary", label: "Live" },
-  hit: { text: "text-hit", fill: "bg-hit", label: "Hit" },
-  lost: { text: "text-miss", fill: "bg-miss", label: "Missed" },
-  push: { text: "text-muted-foreground", fill: "bg-muted-foreground", label: "Push" },
+const LEG_FILL: Record<LegStatus, string> = {
+  pending: "bg-muted-foreground",
+  live: "bg-primary",
+  hit: "bg-hit",
+  lost: "bg-miss",
+  push: "bg-muted-foreground",
 };
+
+// A leg shows one of three marks: hit, missed, or an empty circle for anything not yet decided.
+function LegMark({ status }: { status: LegStatus }) {
+  const className = "mt-px size-5 shrink-0";
+  if (status === "hit") return <CircleCheck role="img" aria-label="Hit" className={cn(className, "text-hit")} />;
+  if (status === "lost") return <CircleX role="img" aria-label="Missed" className={cn(className, "text-miss")} />;
+  const label = status === "live" ? "In progress" : status === "push" ? "Push" : "Pending";
+  return <Circle role="img" aria-label={label} className={cn(className, "text-muted-foreground/60")} />;
+}
 
 // "Rush + rec TDs" should keep its capitals mid-sentence, so only the first letter drops.
 function lowerFirst(label: string): string {
@@ -321,17 +331,18 @@ function lowerFirst(label: string): string {
 const MARKER_AT = 75;
 
 function LegRow({ leg }: { leg: BoardLeg }) {
-  const tone = LEG_TONE[leg.status];
+  const statusFill = LEG_FILL[leg.status];
   const started = leg.game.state !== "pre";
   const fill = started ? Math.max(0, Math.min(100, (leg.value / (leg.line || 1)) * MARKER_AT)) : 0;
   const past = leg.value > leg.line;
   // An over that's past the line reads as good and an under past it reads as bad, even before the final whistle.
-  const liveFill = past ? (leg.direction === "over" ? "bg-hit" : "bg-miss") : tone.fill;
+  const liveFill = past ? (leg.direction === "over" ? "bg-hit" : "bg-miss") : statusFill;
 
   return (
     <li className="py-5 first:pt-0 last:pb-0">
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+      <div className="flex items-start gap-2.5">
+        <LegMark status={leg.status} />
+        <div className="min-w-0 flex-1">
           <p className="truncate font-semibold leading-[1.24]">{leg.playerName}</p>
           <p className="mt-1 type-caption text-muted-foreground">
             <span className="capitalize">{leg.direction}</span> {leg.line} {lowerFirst(leg.statLabel)}
@@ -339,19 +350,16 @@ function LegRow({ leg }: { leg: BoardLeg }) {
             {[leg.position, leg.team].filter(Boolean).join(", ")}
           </p>
         </div>
-        <div className="shrink-0 text-right">
-          <p className={cn("font-heading type-lead font-semibold tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
-            {started ? leg.value : "–"}
-          </p>
-          <p className={cn("type-fine font-semibold", tone.text)}>{tone.label}</p>
-        </div>
+        <p className={cn("shrink-0 font-heading type-lead font-semibold tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
+          {started ? leg.value : "–"}
+        </p>
       </div>
 
       <div className="relative mt-3">
         <Progress
           value={fill}
           aria-label={`${leg.value} of ${leg.line} ${lowerFirst(leg.statLabel)}`}
-          indicatorClassName={leg.status === "live" ? liveFill : tone.fill}
+          indicatorClassName={leg.status === "live" ? liveFill : statusFill}
         />
         <span className="absolute -top-1 h-3.5 w-0.5 rounded-full bg-foreground" style={{ left: `${MARKER_AT}%` }} />
       </div>
