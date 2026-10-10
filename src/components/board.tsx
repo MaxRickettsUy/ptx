@@ -16,6 +16,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
 import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
 import { cn } from "@/lib/utils";
@@ -61,74 +78,129 @@ export function Board() {
     refresh();
   }
 
-  if (!board) {
-    return (
-      <p className="py-32 text-center type-caption text-muted-foreground">
-        {error ? `Couldn't load the board: ${error}` : "Loading the board…"}
-      </p>
-    );
-  }
-
-  const open = board.parlays.filter((p) => p.status === "pending" || p.status === "live");
-  const settled = board.parlays.filter((p) => p.status !== "pending" && p.status !== "live");
-  const problem = error ?? (board.problems.length > 0 ? board.problems.join(" ") : null);
+  const open = board?.parlays.filter((p) => p.status === "pending" || p.status === "live") ?? [];
+  const settled = board?.parlays.filter((p) => p.status !== "pending" && p.status !== "live") ?? [];
+  const problem = error ?? (board && board.problems.length > 0 ? board.problems.join(" ") : null);
 
   return (
-    <>
-      <div className="sticky top-0 z-20 border-b border-black/8 bg-background/80 backdrop-blur-xl backdrop-saturate-[1.8]">
-        <div className="mx-auto flex h-13 w-full max-w-[980px] items-center justify-between px-5">
-          <p className="font-heading type-tagline font-semibold">Game day</p>
-          <p className="flex items-center gap-2 type-caption text-muted-foreground">
-            {board.anyLive && (
-              <span className="flex items-center gap-1.5 text-primary">
-                <span className="size-1.5 animate-pulse-soft rounded-full bg-primary" />
-                Live
-              </span>
-            )}
-            Updated {new Date(board.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+    <SidebarProvider>
+      <SidePanel board={board} open={open} settled={settled} />
+      <SidebarInset>
+        {/* On small screens the panel is a drawer, so it needs a way in now that there's no header. */}
+        <SidebarTrigger className="fixed top-3 left-3 z-20 size-11 rounded-full bg-secondary/80 backdrop-blur-xl md:hidden" />
+
+        {!board ? (
+          <p className="py-32 text-center type-caption text-muted-foreground">
+            {error ? `Couldn't load the board: ${error}` : "Loading the board…"}
           </p>
-        </div>
-      </div>
+        ) : (
+          <>
+            <section className="px-5 pt-20 pb-20">
+              <div className="mx-auto w-full max-w-[980px]">
+                <header className="text-center">
+                  <h1 className="font-heading type-display sm:type-hero">Your parlays.</h1>
+                  <p className="mt-3 type-tagline text-muted-foreground sm:type-lead">
+                    {board.parlays.length === 0
+                      ? "Nothing on the board yet."
+                      : `${open.length} open. ${settled.length} settled.`}
+                  </p>
+                </header>
 
-      <section className="px-5 pt-16 pb-20 sm:pt-20">
-        <div className="mx-auto w-full max-w-[980px]">
-          <header className="text-center">
-            <h1 className="font-heading type-display sm:type-hero">Your parlays.</h1>
-            <p className="mt-3 type-tagline text-muted-foreground sm:type-lead">
-              {board.parlays.length === 0
-                ? "Nothing on the board yet."
-                : `${open.length} open. ${settled.length} settled.`}
-            </p>
-          </header>
+                {problem && (
+                  <p className="mx-auto mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
+                    {problem}
+                  </p>
+                )}
 
-          {problem && (
-            <p className="mx-auto mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
-              {problem}
-            </p>
+                {board.parlays.length === 0 && (
+                  <p className="mx-auto mt-8 max-w-md text-center text-muted-foreground">
+                    Open Claude Code in this project and run{" "}
+                    <code className="rounded-xs bg-track px-1.5 py-0.5 font-mono type-caption text-foreground">/parlay</code>.
+                    Once you approve a slip it appears here and tracks itself.
+                  </p>
+                )}
+
+                {open.length > 0 && <Grid parlays={open} onDelete={remove} className="mt-12" />}
+              </div>
+            </section>
+
+            {settled.length > 0 && (
+              // The settled band drops to true black; the colour change is the section divider.
+              <section className="flex-1 bg-black px-5 py-20">
+                <div className="mx-auto w-full max-w-[980px]">
+                  <h2 className="text-center font-heading type-display">Settled.</h2>
+                  <Grid parlays={settled} onDelete={remove} className="mt-12" />
+                </div>
+              </section>
+            )}
+          </>
+        )}
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
+
+const DOT: Record<ParlayStatus, string> = {
+  pending: "bg-muted-foreground/50",
+  live: "animate-pulse-soft bg-primary",
+  won: "bg-hit",
+  lost: "bg-miss",
+  push: "bg-muted-foreground",
+};
+
+function SidePanel({ board, open, settled }: { board: BoardData | null; open: BoardParlay[]; settled: BoardParlay[] }) {
+  const { setOpenMobile } = useSidebar();
+
+  const group = (label: string, parlays: BoardParlay[]) =>
+    parlays.length > 0 && (
+      <SidebarGroup>
+        <SidebarGroupLabel>{label}</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {parlays.map((parlay) => (
+              <SidebarMenuItem key={parlay.id}>
+                <SidebarMenuButton render={<a href={`#slip-${parlay.id}`} />} onClick={() => setOpenMobile(false)}>
+                  <span className={cn("size-1.5 shrink-0 rounded-full", DOT[parlay.status])} />
+                  <span className="truncate">{parlay.name}</span>
+                </SidebarMenuButton>
+                <SidebarMenuBadge className="text-muted-foreground">
+                  {parlay.legs.filter((l) => l.status === "hit").length}/{parlay.legs.length}
+                </SidebarMenuBadge>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    );
+
+  return (
+    <Sidebar>
+      {/* Safari on the Mac lays a translucent strip of its toolbar over the top ~40px of the page,
+          so on desktop the panel's content starts below that, level with the main column's padding. */}
+      <SidebarHeader className="gap-1 px-4 pt-5 pb-3 md:pt-14">
+        <p className="font-heading type-tagline font-semibold">Parlay Board</p>
+        <p className="flex items-center gap-2 type-fine text-muted-foreground">
+          {board?.anyLive && (
+            <span className="flex items-center gap-1.5 text-primary">
+              <span className="size-1.5 animate-pulse-soft rounded-full bg-primary" />
+              Live
+            </span>
           )}
-
-          {board.parlays.length === 0 && (
-            <p className="mx-auto mt-8 max-w-md text-center text-muted-foreground">
-              Open Claude Code in this project and run{" "}
-              <code className="rounded-xs bg-track px-1.5 py-0.5 font-mono type-caption text-foreground">/parlay</code>.
-              Once you approve a slip it appears here and tracks itself.
-            </p>
-          )}
-
-          {open.length > 0 && <Grid parlays={open} onDelete={remove} className="mt-12" />}
-        </div>
-      </section>
-
-      {settled.length > 0 && (
-        // The settled band is a dark tile; the colour change is the section divider.
-        <section className="dark flex-1 bg-background px-5 py-20 text-foreground">
-          <div className="mx-auto w-full max-w-[980px]">
-            <h2 className="text-center font-heading type-display">Settled.</h2>
-            <Grid parlays={settled} onDelete={remove} className="mt-12" />
-          </div>
-        </section>
-      )}
-    </>
+          {board
+            ? `Updated ${new Date(board.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+            : "Loading…"}
+        </p>
+      </SidebarHeader>
+      <SidebarContent>
+        {group("Open", open)}
+        {group("Settled", settled)}
+      </SidebarContent>
+      <SidebarFooter className="px-4 pb-5 type-fine text-muted-foreground">
+        <p>
+          Build with <code className="font-mono text-foreground">/parlay</code> in Claude Code
+        </p>
+      </SidebarFooter>
+    </Sidebar>
   );
 }
 
@@ -155,7 +227,7 @@ function ParlayCard({ parlay, index, onDelete }: { parlay: BoardParlay; index: n
   const hits = parlay.legs.filter((l) => l.status === "hit").length;
 
   return (
-    <Card className="animate-rise" style={{ animationDelay: `${index * 60}ms` }}>
+    <Card id={`slip-${parlay.id}`} className="animate-rise scroll-mt-6" style={{ animationDelay: `${index * 60}ms` }}>
       <CardHeader>
         <CardTitle>{parlay.name}</CardTitle>
         {parlay.notes && <CardDescription>{parlay.notes}</CardDescription>}
