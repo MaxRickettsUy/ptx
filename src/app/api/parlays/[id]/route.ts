@@ -1,4 +1,4 @@
-import { deleteParlay, setMarkedLost, setStake } from "@/lib/db";
+import { deleteParlay, setDetails, setMarkedLost } from "@/lib/db";
 import { isAmericanOdds, isMultiplier } from "@/lib/odds";
 
 export async function DELETE(_req: Request, ctx: RouteContext<"/api/parlays/[id]">) {
@@ -14,8 +14,9 @@ export async function DELETE(_req: Request, ctx: RouteContext<"/api/parlays/[id]
 const isAmount = (value: unknown): value is number | null =>
   value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
 
-// Accepts either { markedLost } or { wager, odds, multiplier, payout }; in the second form
-// every value is sent, with null clearing it. A slip is priced by odds or a multiplier, not both.
+// Accepts either { markedLost } or { wager, odds, multiplier, payout, labels? }; in the second
+// form every stake value is sent, with null clearing it. A slip is priced by odds or a
+// multiplier, not both. Labels are { human, model, mock } and are left alone when omitted.
 export async function PATCH(req: Request, ctx: RouteContext<"/api/parlays/[id]">) {
   const { id } = await ctx.params;
   const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
@@ -41,11 +42,20 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/parlays/[id]">
       if (odds !== null && multiplier !== null) {
         return Response.json({ error: "Give American odds or a multiple, not both." }, { status: 400 });
       }
-      await setStake(id, { wager, odds, multiplier, payout });
+      const labels = body.labels as Record<string, unknown> | undefined;
+      const flags = labels && [labels.human, labels.model, labels.mock];
+      if (flags && !flags.every((flag) => typeof flag === "boolean")) {
+        return Response.json({ error: "Labels must be { human, model, mock } booleans." }, { status: 400 });
+      }
+      await setDetails(
+        id,
+        { wager, odds, multiplier, payout },
+        flags ? { human: flags[0] as boolean, model: flags[1] as boolean, mock: flags[2] as boolean } : undefined,
+      );
       return new Response(null, { status: 204 });
     }
 
-    return Response.json({ error: "Expected { markedLost } or { wager, odds, multiplier, payout }." }, { status: 400 });
+    return Response.json({ error: "Expected { markedLost } or { wager, odds, multiplier, payout, labels? }." }, { status: 400 });
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 500 });
   }

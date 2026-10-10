@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
 import type { Direction } from "./grade";
+import type { SlipLabels } from "./labels";
 
 function env(name: string): string {
   const value = process.env[name];
@@ -48,6 +49,9 @@ export type ParlayRow = {
   odds: number | null;
   multiplier: number | null;
   payout: number | null;
+  by_human: boolean;
+  by_model: boolean;
+  is_mock: boolean;
   created_at: string;
   legs: LegRow[];
 };
@@ -67,15 +71,18 @@ export async function listParlays(): Promise<ParlayRow[]> {
 
 export type Stake = { wager: number | null; odds: number | null; multiplier: number | null; payout: number | null };
 
+const labelColumns = (labels: SlipLabels) => ({ by_human: labels.human, by_model: labels.model, is_mock: labels.mock });
+
 export async function createParlay(input: {
   name: string;
   notes: string | null;
   legs: NewLeg[];
   stake?: Stake;
+  labels?: SlipLabels;
 }): Promise<string> {
   const { data, error } = await db()
     .from("parlays")
-    .insert({ name: input.name, notes: input.notes, ...input.stake })
+    .insert({ name: input.name, notes: input.notes, ...input.stake, ...(input.labels && labelColumns(input.labels)) })
     .select("id")
     .single();
   if (error) throw new Error(error.message);
@@ -96,8 +103,12 @@ export async function deleteParlay(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-export async function setStake(id: string, stake: Stake): Promise<void> {
-  const { error } = await db().from("parlays").update(stake).eq("id", id);
+/** Saves what the slip editor holds: the stake, and the labels when they are sent too. */
+export async function setDetails(id: string, stake: Stake, labels?: SlipLabels): Promise<void> {
+  const { error } = await db()
+    .from("parlays")
+    .update({ ...stake, ...(labels && labelColumns(labels)) })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 }
 

@@ -43,6 +43,7 @@ import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
 import { useCollapsed } from "@/hooks/use-collapsed";
 import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
+import { LABELS, type SlipLabels } from "@/lib/labels";
 import { formatMoney, formatPrice, impliedPayout, parsePrice } from "@/lib/odds";
 import { cn } from "@/lib/utils";
 
@@ -239,7 +240,7 @@ const LANES: { title: string; empty: string; statuses: ParlayStatus[]; className
   { title: "Settled", empty: "Nothing settled yet.", statuses: ["won", "lost", "push"] },
 ];
 
-type Stake = { wager: number | null; odds: number | null; multiplier: number | null; payout: number | null };
+type Stake = { wager: number | null; odds: number | null; multiplier: number | null; payout: number | null; labels: SlipLabels };
 
 type SlipActions = {
   onDelete: (parlay: BoardParlay) => void;
@@ -324,15 +325,32 @@ function ParlayCard({ parlay, onDelete, onMarkLost, onSetStake }: { parlay: Boar
           <CardDescription className="flex items-center gap-1.5 truncate">
             <span className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[parlay.status])} />
             {statusLabel} · {hits} of {parlay.legs.length} legs hit
+            <LabelMarks labels={parlay.labels} className="ml-1" />
           </CardDescription>
         ) : (
           // The badge and note get the card's full width on their own rows, so the name only
           // shares its row with the chevron and neither has to wrap around the other.
           <div className="col-span-2 mt-1.5 flex flex-col items-start gap-2">
-            <Badge variant={badge.variant} className={badge.className}>
-              {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
-              {statusLabel}
-            </Badge>
+            <div className="flex items-center gap-2.5">
+              <Badge variant={badge.variant} className={badge.className}>
+                {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
+                {statusLabel}
+              </Badge>
+              {/* Who built the slip and whether it was really placed; clicking opens the editor. */}
+              {Object.values(parlay.labels).some(Boolean) && (
+                <button
+                  type="button"
+                  aria-label={`Edit labels for ${parlay.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setStakeOpen(true);
+                  }}
+                  className="cursor-pointer leading-none"
+                >
+                  <LabelMarks labels={parlay.labels} />
+                </button>
+              )}
+            </div>
             {parlay.notes && (
               // A one-line preview; the full note opens in a dialog. The click is kept from
               // reaching the header so it doesn't also collapse the slip.
@@ -415,6 +433,20 @@ function ParlayCard({ parlay, onDelete, onMarkLost, onSetStake }: { parlay: Boar
   );
 }
 
+function LabelMarks({ labels, className }: { labels: SlipLabels; className?: string }) {
+  const shown = LABELS.filter((label) => labels[label.key]);
+  if (shown.length === 0) return null;
+  return (
+    <span className={cn("inline-flex items-center gap-1", className)}>
+      {shown.map((label) => (
+        <span key={label.key} role="img" aria-label={label.name} title={`${label.name}: ${label.hint}`}>
+          {label.emoji}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 // Wager, odds and payout in a fixed band under the header. The whole band opens the editor.
 function StakeStrip({ parlay, onEdit }: { parlay: BoardParlay; onEdit: () => void }) {
   const { wager, payout } = parlay;
@@ -424,7 +456,7 @@ function StakeStrip({ parlay, onEdit }: { parlay: BoardParlay; onEdit: () => voi
   if (wager === null && price === null && payout === null) {
     return (
       <button type="button" onClick={onEdit} className={cn(band, "type-caption text-primary")}>
-        Add wager and odds
+        Add wager, odds and labels
       </button>
     );
   }
@@ -457,6 +489,7 @@ function StakeDialog({ parlay, onClose, onSave }: { parlay: BoardParlay; onClose
   const [price, setPrice] = useState(formatPrice(parlay) ?? "");
   // Only a payout the user typed is shown; a worked-out one appears as the placeholder instead.
   const [payout, setPayout] = useState(parlay.payoutEntered && parlay.payout !== null ? String(parlay.payout) : "");
+  const [labels, setLabels] = useState(parlay.labels);
   const [problem, setProblem] = useState<string | null>(null);
 
   const amount = (text: string) => (text.trim() === "" ? null : Number(text.replace(/[$,\s]/g, "")));
@@ -474,7 +507,13 @@ function StakeDialog({ parlay, onClose, onSave }: { parlay: BoardParlay; onClose
     if (badAmount(wagerValue)) return setProblem("Wager should be an amount, like 10 or 12.50.");
     if (priceValue === "invalid") return setProblem("Odds should be American odds like +450 or -120, or a multiple like 1.9x.");
     if (badAmount(payoutValue)) return setProblem("Payout should be an amount, like 55.");
-    onSave({ wager: wagerValue, odds: priceValue?.odds ?? null, multiplier: priceValue?.multiplier ?? null, payout: payoutValue });
+    onSave({
+      wager: wagerValue,
+      odds: priceValue?.odds ?? null,
+      multiplier: priceValue?.multiplier ?? null,
+      payout: payoutValue,
+      labels,
+    });
   }
 
   const field = "grid gap-1.5 type-caption text-muted-foreground";
@@ -484,7 +523,7 @@ function StakeDialog({ parlay, onClose, onSave }: { parlay: BoardParlay; onClose
       <DialogContent>
         <form onSubmit={submit} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>Wager and odds</DialogTitle>
+            <DialogTitle>Slip details</DialogTitle>
             <DialogDescription className="type-caption">{parlay.name}</DialogDescription>
           </DialogHeader>
           <label className={field}>
@@ -505,6 +544,29 @@ function StakeDialog({ parlay, onClose, onSave }: { parlay: BoardParlay; onClose
             />
             <span className="type-fine">Total returned on a win, stake included. Leave blank unless your book shows a different figure.</span>
           </label>
+          <fieldset className="grid gap-1.5">
+            <legend className="mb-1.5 type-caption text-muted-foreground">Labels</legend>
+            <div className="flex flex-wrap gap-2">
+              {LABELS.map((label) => (
+                <button
+                  key={label.key}
+                  type="button"
+                  aria-pressed={labels[label.key]}
+                  title={label.hint}
+                  onClick={() => setLabels({ ...labels, [label.key]: !labels[label.key] })}
+                  className={cn(
+                    "cursor-pointer rounded-full border px-3 py-1.5 type-caption transition-colors",
+                    labels[label.key] ? "border-primary bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <span aria-hidden className="mr-1.5">
+                    {label.emoji}
+                  </span>
+                  {label.name}
+                </button>
+              ))}
+            </div>
+          </fieldset>
           {problem && <p className="type-caption text-destructive">{problem}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" size="sm" onClick={onClose}>

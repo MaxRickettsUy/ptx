@@ -31,6 +31,14 @@ Before calling `save_parlay`, show the final slip and get a clear yes. Saving is
 
 Once the legs are settled, ask how much they're staking and what price the book is showing for the whole parlay. Pass the stake as `wager`. Pass the price as `odds` if it's American (+450 is `450`), or as `multiplier` if the book shows a multiple, as Underdog does (1.9x is `1.9`). Use whichever form the user gives and don't convert between them; never pass both. The board works the payout out from those. Only pass `payout` if the book's figure is different, as with a boost. All of these are optional: if the user doesn't want to give them, save without.
 
+Every slip is labelled with who built it, so set these honestly from how the conversation actually went:
+
+- `human_involved`: true if the user picked or changed any legs themselves (named a player, swapped a market, flipped a direction). Supplying lines and saying yes doesn't count on its own.
+- `model_involved`: true if you proposed or shaped any legs. It's false only when the user dictated the whole slip and you just recorded it.
+- `mock`: true if this is a what-if slip they aren't actually submitting to a book. If it's not clear whether they're placing it, ask.
+
+A slip you worked out together has both of the first two set.
+
 Put the idea behind the parlay in `notes` in a sentence or two. The conversation isn't stored with the slip, so that note is the only record of why it was built.
 
 If `save_parlay` returns `saved: false`, fix the listed problems and try again. If it fails with a connection error, the local database is probably down: tell the user to run `supabase start` in the project.

@@ -111,6 +111,16 @@ server.registerTool(
     inputSchema: {
       name: z.string().describe("Short name for the slip, e.g. 'SNF Ravens stack'"),
       notes: z.string().optional().describe("One or two sentences on the idea behind the parlay; shown on the board"),
+      human_involved: z
+        .boolean()
+        .describe("True if the user chose or shaped any of the legs themselves, beyond supplying lines and approving. Shown on the slip as 🧑."),
+      model_involved: z
+        .boolean()
+        .describe("True if you proposed or shaped any of the legs. False only when the user dictated the whole slip and you just recorded it. Shown as 🤖."),
+      mock: z
+        .boolean()
+        .optional()
+        .describe("True for a what-if slip the user is not actually submitting to a book. Shown as 🧪. Defaults to false."),
       wager: z.number().nonnegative().optional().describe("Stake in dollars, if the user gave one"),
       odds: z
         .number()
@@ -144,7 +154,7 @@ server.registerTool(
         .max(15),
     },
   },
-  ({ name, notes, wager, odds, multiplier, payout, legs }) =>
+  ({ name, notes, human_involved, model_involved, mock, wager, odds, multiplier, payout, legs }) =>
     respond(async () => {
       const problems: string[] = [];
       if (odds !== undefined && multiplier !== undefined) {
@@ -191,6 +201,7 @@ server.registerTool(
         notes: notes ?? null,
         legs: valid,
         stake: { wager: wager ?? null, odds: odds ?? null, multiplier: multiplier ?? null, payout: payout ?? null },
+        labels: { human: human_involved, model: model_involved, mock: mock ?? false },
       });
       return { saved: true, parlay_id: parlayId, board_url: BOARD_URL, legs: valid };
     }),

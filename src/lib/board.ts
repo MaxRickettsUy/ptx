@@ -4,6 +4,7 @@ import { listParlays, settleLeg, settleParlay, type LegRow } from "./db";
 import { demoGameStats, isDemoEvent } from "./demo";
 import { getGameStats, getScoreboard, headshotUrl, type Game, type GameStats } from "./espn";
 import { gradeLeg, gradeParlay, type Direction, type GameState, type LegStatus, type ParlayStatus } from "./grade";
+import type { SlipLabels } from "./labels";
 import { impliedPayout } from "./odds";
 import { EMPTY_LINE, STATS, isStatKey } from "./stats";
 
@@ -43,6 +44,7 @@ export type BoardParlay = {
   payout: number | null;
   /** True when the payout was entered by hand rather than derived from the wager and price. */
   payoutEntered: boolean;
+  labels: SlipLabels;
   status: ParlayStatus;
   legs: BoardLeg[];
 };
@@ -173,6 +175,7 @@ export async function getBoard(): Promise<Board> {
       multiplier,
       payout,
       payoutEntered: parlay.payout !== null,
+      labels: { human: parlay.by_human, model: parlay.by_model, mock: parlay.is_mock },
       status,
       legs,
     };

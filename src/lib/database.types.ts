@@ -101,8 +101,11 @@ export type Database = {
       }
       parlays: {
         Row: {
+          by_human: boolean
+          by_model: boolean
           created_at: string
           id: string
+          is_mock: boolean
           marked_lost_at: string | null
           multiplier: number | null
           name: string
@@ -114,8 +117,11 @@ export type Database = {
           wager: number | null
         }
         Insert: {
+          by_human?: boolean
+          by_model?: boolean
           created_at?: string
           id?: string
+          is_mock?: boolean
           marked_lost_at?: string | null
           multiplier?: number | null
           name: string
@@ -127,8 +133,11 @@ export type Database = {
           wager?: number | null
         }
         Update: {
+          by_human?: boolean
+          by_model?: boolean
           created_at?: string
           id?: string
+          is_mock?: boolean
           marked_lost_at?: string | null
           multiplier?: number | null
           name?: string
