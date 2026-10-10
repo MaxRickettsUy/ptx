@@ -1,0 +1,188 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/*
+ * Theme tokens follow the Apple DESIGN.md published at shadcn.io/design/apple:
+ * one interactive blue, parchment and near-black surfaces, SF Pro via the system
+ * font stack, 17px body, hairlines instead of shadows. Hit and miss colours are
+ * the one addition, since the spec has no status palette.
+ */
+
+@custom-variant dark (&:is(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-hit: var(--hit);
+  --color-miss: var(--miss);
+  --color-track: var(--track);
+
+  /* On Apple platforms system-ui resolves to SF Pro; Inter is the closest fallback elsewhere. */
+  --font-sans: "SF Pro Text", system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  --font-heading: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 11px;
+  --radius-xl: 18px;
+
+  --animate-rise: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-pulse-soft: pulse-soft 1.8s ease-in-out infinite;
+}
+
+/*
+ * The spec's type ladder. These are utilities rather than --text-* theme tokens because
+ * the class merger treats unknown text-* names as colours and drops them next to a real one.
+ */
+@utility type-hero {
+  font-size: 56px;
+  line-height: 1.07;
+  letter-spacing: -0.28px;
+  font-weight: 600;
+}
+
+@utility type-display {
+  font-size: 40px;
+  line-height: 1.1;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+@utility type-lead {
+  font-size: 28px;
+  line-height: 1.14;
+  letter-spacing: 0.196px;
+}
+
+@utility type-tagline {
+  font-size: 21px;
+  line-height: 1.19;
+  letter-spacing: 0.231px;
+}
+
+@utility type-body {
+  font-size: 17px;
+  line-height: 1.47;
+  letter-spacing: -0.374px;
+}
+
+@utility type-caption {
+  font-size: 14px;
+  line-height: 1.43;
+  letter-spacing: -0.224px;
+}
+
+@utility type-fine {
+  font-size: 12px;
+  line-height: 1.33;
+  letter-spacing: -0.12px;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes pulse-soft {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+:root {
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --card: #ffffff;
+  --card-foreground: #1d1d1f;
+  --popover: #ffffff;
+  --popover-foreground: #1d1d1f;
+  --primary: #0066cc;
+  --primary-foreground: #ffffff;
+  --secondary: #fafafc;
+  --secondary-foreground: #333333;
+  --muted: #f5f5f7;
+  /* The spec's #7a7a7a falls short of 4.5:1 on white, so secondary text is a step darker. */
+  --muted-foreground: #6e6e73;
+  --accent: #f5f5f7;
+  --accent-foreground: #1d1d1f;
+  --destructive: #d70015;
+  --border: #e0e0e0;
+  --input: #e0e0e0;
+  --ring: #0071e3;
+  --track: #e8e8ed;
+  --hit: #248a3d;
+  --miss: #d70015;
+}
+
+/* Scoped to dark tiles rather than a global mode: the settled band is a near-black tile. */
+.dark {
+  --background: #272729;
+  --foreground: #ffffff;
+  --card: #2a2a2c;
+  --card-foreground: #ffffff;
+  --popover: #2a2a2c;
+  --popover-foreground: #ffffff;
+  --primary: #2997ff;
+  --primary-foreground: #ffffff;
+  --secondary: #3a3a3c;
+  --secondary-foreground: #ffffff;
+  --muted: #3a3a3c;
+  --muted-foreground: #cccccc;
+  --accent: #3a3a3c;
+  --accent-foreground: #ffffff;
+  --destructive: #ff453a;
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.15);
+  --ring: #2997ff;
+  --track: #3a3a3c;
+  --hit: #30d158;
+  --miss: #ff453a;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-background type-body text-foreground;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
