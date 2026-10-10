@@ -1,4 +1,4 @@
-# Parlay Board
+# ptx
 
 Build NFL player-prop parlays by talking them through in Claude Code, then watch every leg track live against the box score.
 

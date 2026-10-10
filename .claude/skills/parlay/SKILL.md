@@ -1,6 +1,6 @@
 ---
 name: parlay
-description: Build an NFL player-prop parlay with the user and save it to the Parlay Board tracker. Use when the user wants to build, draft or save a parlay, or asks for prop legs for an NFL game.
+description: Build an NFL player-prop parlay with the user and save it to the ptx tracker. Use when the user wants to build, draft or save a parlay, or asks for prop legs for an NFL game.
 ---
 
 # Building a parlay

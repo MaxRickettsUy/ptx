@@ -252,7 +252,7 @@ function SidePanel({ board, days, activeKey }: { board: BoardData | null; days: 
       {/* Safari on the Mac lays a translucent strip of its toolbar over the top ~40px of the page,
           so on desktop the panel's content starts below that, level with the main column's padding. */}
       <SidebarHeader className="gap-1 px-4 pt-5 pb-3 md:pt-14">
-        <p className="font-heading type-tagline font-semibold">Parlay Board</p>
+        <p className="font-heading type-tagline font-semibold">ptx</p>
         <p className="flex items-center gap-2 type-fine text-muted-foreground">
           {board?.anyLive && (
             <span className="flex items-center gap-1.5 text-primary">

@@ -3,7 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Parlay Board",
+  title: "ptx",
   description: "Track NFL player-prop parlays leg by leg against the live box score.",
 };
 
