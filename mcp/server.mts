@@ -7,7 +7,7 @@ import path from "node:path";
 import { z } from "zod";
 import { createParlay } from "../src/lib/db";
 import { getGameLog, getGameStats, getInjuries, getRoster, getScoreboard, searchPlayers, type Game } from "../src/lib/espn";
-import { STAT_KEYS, STATS } from "../src/lib/stats";
+import { PERIOD_KEYS, STAT_KEYS, STATS } from "../src/lib/stats";
 
 process.loadEnvFile(path.join(import.meta.dirname, "..", ".env.local"));
 
@@ -148,6 +148,12 @@ server.registerTool(
             stat: z.enum(STAT_KEYS),
             direction: z.enum(["over", "under"]),
             line: z.number().describe("The sportsbook line the user gave. Record '60+' as 59.5."),
+            period: z
+              .enum(PERIOD_KEYS)
+              .optional()
+              .describe(
+                "The part of the game the leg covers. Defaults to game. q1 to q4 count that quarter only. each_quarter means the line must be beaten in every one of the four quarters separately, e.g. '10+ rushing yards in each quarter' is rushing_yards over 9.5 with each_quarter. Overtime counts towards none of the quarters.",
+              ),
           }),
         )
         .min(1)
@@ -189,6 +195,7 @@ server.registerTool(
             stat: leg.stat,
             direction: leg.direction,
             line: leg.line,
+            period: leg.period ?? "game",
           };
         }),
       );

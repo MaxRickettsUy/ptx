@@ -21,8 +21,8 @@ Then start Claude Code in this directory, approve the `parlay` MCP server when p
 
 | Path | What it does |
 | --- | --- |
-| `src/lib/espn.ts` | The only file that knows ESPN's response shapes. Their endpoints are unofficial, so swap this file to change stats provider. |
-| `src/lib/stats.ts` | The trackable markets and how each is computed from a box-score line. Add a market here and it's available to Claude and the board. |
+| `src/lib/espn.ts` | The only file that knows ESPN's response shapes. Their endpoints are unofficial, so swap this file to change stats provider. Quarter-by-quarter lines are rebuilt from the play-by-play, since the box score only has game totals; the board won't settle a quarter leg whose quarters don't add up to the box score. |
+| `src/lib/stats.ts` | The trackable markets and how each is computed from a box-score line. Add a market here and it's available to Claude and the board. Also the periods a leg can cover: the full game, one quarter, or each quarter. |
 | `src/lib/grade.ts` | Leg and parlay status rules. |
 | `src/lib/board.ts` | Joins saved legs with live stats and settles finished ones. |
 | `mcp/server.mts` | The MCP server Claude Code uses: five research tools and `save_parlay`. Registered in `.mcp.json`. |

@@ -2,7 +2,7 @@
 // Any leg whose event id starts with "demo-" is graded against this instead of ESPN.
 // The game replays on a one-hour loop of real time, so the numbers climb as you watch.
 
-import type { GameStats } from "./espn";
+import type { GameStats, QuarterStats } from "./espn";
 import { EMPTY_LINE, type PlayerLine } from "./stats";
 
 const DEMO_PREFIX = "demo-";
@@ -50,4 +50,20 @@ export function demoGameStats(eventId: string, now: Date): GameStats {
     },
     players,
   };
+}
+
+export function demoQuarterStats(now: Date): QuarterStats {
+  const elapsed = now.getMinutes() + now.getSeconds() / 60;
+  const players: QuarterStats["players"] = {};
+  for (const [id, player] of Object.entries(FULL_GAME)) {
+    players[id] = [0, 1, 2, 3].map((quarter) => {
+      const played = Math.max(0, Math.min(1, elapsed / QUARTER_MINUTES - quarter));
+      const line = { ...EMPTY_LINE };
+      for (const [key, value] of Object.entries(player.line)) {
+        line[key as keyof PlayerLine] = Math.floor((value / 4) * played);
+      }
+      return line;
+    });
+  }
+  return { quartersDone: Math.min(3, Math.floor(elapsed / QUARTER_MINUTES)), players };
 }

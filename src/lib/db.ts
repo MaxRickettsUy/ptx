@@ -34,7 +34,10 @@ export type LegRow = {
   stat: string;
   direction: Direction;
   line: number;
+  period: string;
   final_value: number | null;
+  /** What an each-quarter leg finished with in each of the four quarters. */
+  quarter_values: number[] | null;
   result: "hit" | "lost" | "push" | null;
 };
 
@@ -56,7 +59,7 @@ export type ParlayRow = {
   legs: LegRow[];
 };
 
-export type NewLeg = Omit<LegRow, "id" | "parlay_id" | "position_in_parlay" | "final_value" | "result">;
+export type NewLeg = Omit<LegRow, "id" | "parlay_id" | "position_in_parlay" | "final_value" | "quarter_values" | "result">;
 
 export async function listParlays(): Promise<ParlayRow[]> {
   const { data, error } = await db()
@@ -121,8 +124,16 @@ export async function setMarkedLost(id: string, markedLost: boolean): Promise<vo
   if (error) throw new Error(error.message);
 }
 
-export async function settleLeg(id: string, finalValue: number, result: "hit" | "lost" | "push"): Promise<void> {
-  const { error } = await db().from("legs").update({ final_value: finalValue, result }).eq("id", id);
+export async function settleLeg(
+  id: string,
+  finalValue: number,
+  result: "hit" | "lost" | "push",
+  quarterValues: number[] | null = null,
+): Promise<void> {
+  const { error } = await db()
+    .from("legs")
+    .update({ final_value: finalValue, quarter_values: quarterValues, result })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 }
 

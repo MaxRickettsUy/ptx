@@ -25,6 +25,8 @@ A line written as "60+" means 60 or more, so record it as over 59.5. An anytime 
 
 Only the markets listed in the `save_parlay` tool can be tracked, so only propose legs in those. `touchdowns` counts rushing and receiving scores, which is how anytime-TD props are settled for skill players; it excludes passing touchdowns thrown.
 
+A leg covers the full game unless you set its `period`. Use `q1` to `q4` for a single-quarter prop, and `each_quarter` when the line has to be beaten in every one of the four quarters separately: "10+ rushing yards in each quarter" is `rushing_yards` over 9.5 with `each_quarter`. A bet on two players each doing that is two legs. Overtime counts towards no quarter. There are no half or per-drive periods, so say so rather than approximating one.
+
 ## Saving
 
 Before calling `save_parlay`, show the final slip and get a clear yes. Saving is what puts it on the live board, so don't save a draft the user is still adjusting. Use the athlete ids and event ids exactly as the tools returned them, because the tracker matches box-score rows by those ids.

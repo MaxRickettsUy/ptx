@@ -62,3 +62,30 @@ export const STAT_KEYS = Object.keys(STATS) as [StatKey, ...StatKey[]];
 export function isStatKey(value: string): value is StatKey {
   return value in STATS;
 }
+
+// The part of the game a leg covers. "each_quarter" means the line has to be beaten in every
+// one of the four quarters on its own, as in "10+ rushing yards in each quarter".
+export const PERIODS = {
+  game: { label: "Full game", quarter: null },
+  q1: { label: "1st quarter", quarter: 1 },
+  q2: { label: "2nd quarter", quarter: 2 },
+  q3: { label: "3rd quarter", quarter: 3 },
+  q4: { label: "4th quarter", quarter: 4 },
+  each_quarter: { label: "Each quarter", quarter: null },
+} as const;
+
+export type PeriodKey = keyof typeof PERIODS;
+
+export const PERIOD_KEYS = Object.keys(PERIODS) as [PeriodKey, ...PeriodKey[]];
+
+export function isPeriodKey(value: string): value is PeriodKey {
+  return value in PERIODS;
+}
+
+export function addLines(lines: PlayerLine[]): PlayerLine {
+  const total = { ...EMPTY_LINE };
+  for (const line of lines) {
+    for (const key of Object.keys(total) as (keyof PlayerLine)[]) total[key] += line[key];
+  }
+  return total;
+}

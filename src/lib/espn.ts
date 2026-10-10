@@ -7,6 +7,7 @@ import { EMPTY_LINE, type PlayerLine } from "./stats";
 
 const SITE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl";
 const WEB = "https://site.web.api.espn.com/apis/common/v3";
+const CORE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl";
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -35,6 +36,13 @@ export type PlayerSummary = {
 export type GameStats = {
   game: Game;
   players: Record<string, { name: string; team: string; line: PlayerLine }>;
+};
+
+export type QuarterStats = {
+  /** How many of the four quarters have finished. */
+  quartersDone: number;
+  /** One stat line per period for each player: index 0 is the first quarter, and overtime follows the fourth. */
+  players: Record<string, PlayerLine[]>;
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -148,6 +156,126 @@ export async function getGameStats(eventId: string): Promise<GameStats> {
       }
     }
     return { game, players };
+  });
+}
+
+// Yards between two spots as the play-by-play writes them: "BLT 41", or a bare "50" at midfield.
+function yardsBetween(a: string, b: string): number {
+  const [sideA, atA] = a.includes(" ") ? a.split(" ") : [null, a];
+  const [sideB, atB] = b.includes(" ") ? b.split(" ") : [null, b];
+  const acrossMidfield = sideA !== null && sideB !== null && sideA !== sideB;
+  return acrossMidfield ? 100 - num(atA) - num(atB) : Math.abs(num(atA) - num(atB));
+}
+
+const SPOT = String.raw`((?:[A-Z]+ )?\d+)`;
+
+function creditedYards(play: any, full: string, text: string): number {
+  // On a fumbled snap the yardage that counts is the pass that followed it.
+  const described = text.slice(Math.max(0, text.search(/\bpass\b/i)));
+  const gain = /for (-?\d+) yards?/i.exec(described);
+  const yards = gain ? num(gain[1]) : /for no gain/i.test(described) ? 0 : num(play.statYardage);
+
+  // A foul by the offense during the play is marked off from where it happened, and the
+  // ball carrier is only credited up to that spot.
+  const foulAt = new RegExp(`penalty on .*?enforced at ${SPOT}`, "i").exec(full)?.[1];
+  if (!foulAt) return yards;
+  const endedAt = new RegExp(`(?:to|at) ${SPOT} for`).exec(described)?.[1];
+  if (endedAt) return yards - yardsBetween(endedAt, foulAt);
+
+  // A touchdown run that was called back names no end spot, but it ended on the goal line.
+  // The foul was either N yards out or 100 - N; only count it when one of those fits the run.
+  const out = num(foulAt.split(" ").at(-1));
+  const fits = [out, 100 - out].filter((n) => n <= yards);
+  return /touchdown/i.test(text) && fits.length === 1 ? yards - fits[0] : yards;
+}
+
+// The box score only carries game totals, so quarter-by-quarter lines are rebuilt from the
+// play-by-play. That can drift from the official totals on odd plays (laterals, fumbles, stat
+// corrections), so callers should check the quarters still add up to the box score.
+export function quarterStatsFromPlays(plays: any[], finished: boolean): QuarterStats {
+  const players: QuarterStats["players"] = {};
+  const ended = new Set<number>();
+  let latest = 0;
+
+  for (const play of plays) {
+    const period = num(play.period?.number);
+    if (period < 1) continue;
+    latest = Math.max(latest, period);
+    if (/^End (Period|of Half|of Game)/i.test(play.type?.text ?? "")) ended.add(period);
+
+    // After a replay reversal the corrected ruling follows the original one.
+    const full: string = (play.text ?? "").split(/reversed\./i).at(-1);
+    if (/no play/i.test(full)) continue;
+
+    const lineFor = (athleteId: string): PlayerLine => {
+      const periods = (players[athleteId] ??= []);
+      while (periods.length < period) periods.push({ ...EMPTY_LINE });
+      return periods[period - 1];
+    };
+    const who = (type: string): string[] =>
+      (play.participants ?? [])
+        .filter((p: any) => p.type === type)
+        .map((p: any) => /athletes\/(\d+)/.exec(p.athlete?.$ref ?? "")?.[1])
+        .filter(Boolean);
+
+    if (/field goal is good/i.test(full)) {
+      for (const id of who("kicker").slice(0, 1)) {
+        lineFor(id).fgMade += 1;
+        lineFor(id).kickPts += 3;
+      }
+    }
+    if (/extra point is good/i.test(full)) {
+      for (const id of who("kicker").slice(0, 1)) lineFor(id).kickPts += 1;
+    }
+
+    // A conversion try or a penalty tacked on the end describes something other than the play being counted.
+    const text = full.split(/two-point conversion|penalty on/i)[0];
+    const yards = creditedYards(play, full, text);
+    const touchdown = play.scoringPlay === true && /touchdown/i.test(text);
+    const scorers = touchdown ? who("scorer") : [];
+
+    const [passer] = who("passer");
+    const [rusher] = who("rusher");
+    if (passer) {
+      if (/sacked/i.test(text)) continue;
+      const line = lineFor(passer);
+      line.passAtt += 1;
+      if (/intercepted/i.test(text)) {
+        line.passInt += 1;
+      } else if (!/incomplete|spiked/i.test(text)) {
+        const [receiver] = who("receiver");
+        line.passCmp += 1;
+        // The passer gets the whole play when the catch is lateralled on; the receiver only his part.
+        line.passYds += /lateral/i.test(text) ? num(play.statYardage) : yards;
+        if (receiver) {
+          lineFor(receiver).rec += 1;
+          lineFor(receiver).recYds += yards;
+          if (scorers.includes(receiver)) {
+            lineFor(receiver).recTd += 1;
+            line.passTd += 1;
+          }
+        }
+      }
+    } else if (rusher) {
+      lineFor(rusher).rushAtt += 1;
+      lineFor(rusher).rushYds += yards;
+      if (scorers.includes(rusher)) lineFor(rusher).rushTd += 1;
+    }
+  }
+
+  const quartersDone = finished ? 4 : Math.min(4, ended.has(latest) ? latest : latest - 1);
+  return { quartersDone: Math.max(0, quartersDone), players };
+}
+
+export async function getQuarterStats(eventId: string, finished: boolean): Promise<QuarterStats> {
+  return cached(`plays:${eventId}:${finished}`, 15 * SECOND, async () => {
+    const base = `${CORE}/events/${encodeURIComponent(eventId)}/competitions/${encodeURIComponent(eventId)}/plays?limit=400`;
+    const first = await getJson(base);
+    const plays: any[] = first.items ?? [];
+    for (let page = 2; page <= num(first.pageCount); page++) {
+      plays.push(...((await getJson(`${base}&page=${page}`)).items ?? []));
+    }
+    return quarterStatsFromPlays(plays, finished);
   });
 }
 

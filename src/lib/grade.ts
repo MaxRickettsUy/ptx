@@ -23,6 +23,15 @@ export function gradeLeg(input: {
   return "live";
 }
 
+/** An each-quarter leg needs all four quarters, so one missed quarter loses it straight away. */
+export function gradeQuarters(quarters: LegStatus[]): LegStatus {
+  if (quarters.includes("lost")) return "lost";
+  if (quarters.every((s) => s === "push")) return "push";
+  if (quarters.every((s) => s === "hit" || s === "push")) return "hit";
+  if (quarters.every((s) => s === "pending")) return "pending";
+  return "live";
+}
+
 export function gradeParlay(legs: LegStatus[]): ParlayStatus {
   if (legs.length === 0) return "pending";
   if (legs.includes("lost")) return "lost";

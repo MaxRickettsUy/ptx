@@ -1,12 +1,12 @@
 import "server-only";
 
 import { listParlays, settleLeg, settleParlay, type LegRow } from "./db";
-import { demoGameStats, isDemoEvent } from "./demo";
-import { getGameStats, getScoreboard, headshotUrl, type Game, type GameStats } from "./espn";
-import { gradeLeg, gradeParlay, type Direction, type GameState, type LegStatus, type ParlayStatus } from "./grade";
+import { demoGameStats, demoQuarterStats, isDemoEvent } from "./demo";
+import { getGameStats, getQuarterStats, getScoreboard, headshotUrl, type Game, type GameStats, type QuarterStats } from "./espn";
+import { gradeLeg, gradeParlay, gradeQuarters, type Direction, type GameState, type LegStatus, type ParlayStatus } from "./grade";
 import type { SlipLabels } from "./labels";
 import { impliedPayout } from "./odds";
-import { EMPTY_LINE, STATS, isStatKey } from "./stats";
+import { EMPTY_LINE, PERIODS, STATS, addLines, isPeriodKey, isStatKey, type PeriodKey } from "./stats";
 
 export type BoardLeg = {
   id: string;
@@ -18,7 +18,12 @@ export type BoardLeg = {
   statLabel: string;
   direction: Direction;
   line: number;
+  /** Null for a full-game leg; otherwise the part of the game it covers, e.g. "Each quarter". */
+  periodLabel: string | null;
+  /** For an each-quarter leg this is the quarter closest to losing it. */
   value: number;
+  /** Q1 to Q4, on each-quarter legs only. */
+  quarters: { value: number; status: LegStatus }[] | null;
   status: LegStatus;
   game: {
     label: string;
@@ -91,11 +96,31 @@ export async function getBoard(): Promise<Board> {
       }),
   );
 
+  // Quarter-by-quarter numbers come from the play-by-play, a second request, so only fetch
+  // them for games with a leg that needs them.
+  const quarterEvents = new Set(
+    parlays.flatMap((p) => p.legs.filter((l) => !l.result && l.period !== "game").map((l) => l.event_id)),
+  );
+  const quarterStats = new Map<string, QuarterStats>();
+  await Promise.all(
+    [...quarterEvents].map(async (id) => {
+      const game = stats.get(id)?.game;
+      if (!game || game.state === "pre") return;
+      try {
+        quarterStats.set(id, isDemoEvent(id) ? demoQuarterStats(new Date()) : await getQuarterStats(id, game.state === "post"));
+      } catch (error) {
+        problems.push(`Quarter stats unavailable for event ${id}: ${(error as Error).message}`);
+      }
+    }),
+  );
+
   const writes: Promise<void>[] = [];
 
   const view = parlays.map((parlay): BoardParlay => {
     const legs = parlay.legs.map((leg): BoardLeg => {
       const def = isStatKey(leg.stat) ? STATS[leg.stat] : null;
+      const period: PeriodKey = isPeriodKey(leg.period) ? leg.period : "game";
+      const line = Number(leg.line);
       const base = {
         id: leg.id,
         playerName: leg.player_name,
@@ -105,13 +130,20 @@ export async function getBoard(): Promise<Board> {
         statShort: def?.short ?? leg.stat,
         statLabel: def?.label ?? leg.stat,
         direction: leg.direction,
-        line: Number(leg.line),
+        line,
+        periodLabel: period === "game" ? null : PERIODS[period].label,
+        quarters: null,
       };
 
       if (leg.result) {
         return {
           ...base,
           value: Number(leg.final_value ?? 0),
+          quarters:
+            leg.quarter_values?.map((raw) => {
+              const value = Number(raw);
+              return { value, status: gradeLeg({ direction: leg.direction, line, value, state: "post", monotonic: true }) };
+            }) ?? null,
           status: leg.result,
           game: { label: leg.game_label, date: leg.game_date, state: "post", detail: "Final", score: null },
         };
@@ -129,16 +161,56 @@ export async function getBoard(): Promise<Board> {
       }
 
       // A player with no box-score row yet simply hasn't recorded a stat.
-      const value = def.value(gameStats?.players[leg.athlete_id]?.line ?? EMPTY_LINE);
-      const status = gradeLeg({ direction: leg.direction, line: base.line, value, state: game.state, monotonic: def.monotonic });
+      const boxValue = def.value(gameStats?.players[leg.athlete_id]?.line ?? EMPTY_LINE);
+      let value = boxValue;
+      let status = gradeLeg({ direction: leg.direction, line, value, state: game.state, monotonic: def.monotonic });
+      let quarters: BoardLeg["quarters"] = null;
+      let settleable = gameStats !== undefined;
 
-      if (game.state === "post" && gameStats && status !== "pending" && status !== "live") {
-        writes.push(settleLegQuietly(leg, value, status, problems));
+      if (period !== "game" && game.state !== "pre") {
+        const byQuarter = quarterStats.get(leg.event_id);
+        const lines = byQuarter?.players[leg.athlete_id] ?? [];
+        const done = byQuarter?.quartersDone ?? 0;
+        const inQuarter = (quarter: number) => {
+          const quarterValue = def.value(lines[quarter - 1] ?? EMPTY_LINE);
+          const state: GameState = quarter <= done ? "post" : quarter === done + 1 ? "in" : "pre";
+          return {
+            value: quarterValue,
+            status: gradeLeg({ direction: leg.direction, line, value: quarterValue, state, monotonic: def.monotonic }),
+          };
+        };
+
+        if (period === "each_quarter") {
+          quarters = [1, 2, 3, 4].map(inQuarter);
+          const started = quarters.filter((q) => q.status !== "pending").map((q) => q.value);
+          value = started.length === 0 ? 0 : leg.direction === "over" ? Math.min(...started) : Math.max(...started);
+          status = gradeQuarters(quarters.map((q) => q.status));
+        } else {
+          ({ value, status } = inQuarter(PERIODS[period].quarter));
+        }
+
+        // The quarters are pieced together from the play-by-play, which can disagree with the
+        // official totals. Don't write a result down on numbers that don't add up.
+        const total = def.value(addLines(lines));
+        if (!byQuarter) {
+          settleable = false;
+          if (status === "pending") status = "live";
+        } else if (game.state === "post" && total !== boxValue) {
+          settleable = false;
+          problems.push(
+            `${leg.player_name}: quarter-by-quarter ${def.label.toLowerCase()} adds up to ${total} but the box score says ${boxValue}, so this leg is not being settled automatically.`,
+          );
+        }
+      }
+
+      if (game.state === "post" && settleable && status !== "pending" && status !== "live") {
+        writes.push(settleLegQuietly(leg, value, status, quarters?.map((q) => q.value) ?? null, problems));
       }
 
       return {
         ...base,
         value,
+        quarters,
         status,
         game: { label: game.label, date: game.date, state: game.state, detail: game.detail, score: score(game) },
       };
@@ -191,9 +263,15 @@ export async function getBoard(): Promise<Board> {
   };
 }
 
-async function settleLegQuietly(leg: LegRow, value: number, status: "hit" | "lost" | "push", problems: string[]) {
+async function settleLegQuietly(
+  leg: LegRow,
+  value: number,
+  status: "hit" | "lost" | "push",
+  quarterValues: number[] | null,
+  problems: string[],
+) {
   try {
-    await settleLeg(leg.id, value, status);
+    await settleLeg(leg.id, value, status, quarterValues);
   } catch (error) {
     problems.push(`Could not settle ${leg.player_name}: ${(error as Error).message}`);
   }

@@ -709,13 +709,30 @@ function lowerFirst(label: string): string {
 // The line sits three-quarters of the way along the bar, leaving room to show a leg running past it.
 const MARKER_AT = 75;
 
-function LegRow({ leg }: { leg: BoardLeg }) {
-  const statusFill = LEG_FILL[leg.status];
-  const started = leg.game.state !== "pre";
-  const fill = started ? Math.max(0, Math.min(100, (leg.value / (leg.line || 1)) * MARKER_AT)) : 0;
-  const past = leg.value > leg.line;
+// The bar for one number against the line. A leg has one; an each-quarter leg has one per quarter.
+function LegBar({ leg, value, status, started }: { leg: BoardLeg; value: number; status: LegStatus; started: boolean }) {
+  const statusFill = LEG_FILL[status];
+  const fill = started ? Math.max(0, Math.min(100, (value / (leg.line || 1)) * MARKER_AT)) : 0;
+  const past = value > leg.line;
   // An over that's past the line reads as good and an under past it reads as bad, even before the final whistle.
   const liveFill = past ? (leg.direction === "over" ? "bg-hit" : "bg-miss") : statusFill;
+
+  return (
+    <div className="relative">
+      <Progress
+        value={fill}
+        aria-label={`${value} of ${leg.line} ${lowerFirst(leg.statLabel)}`}
+        indicatorClassName={status === "live" ? liveFill : statusFill}
+      />
+      <span className="absolute -top-1 h-3.5 w-0.5 rounded-full bg-foreground" style={{ left: `${MARKER_AT}%` }} />
+    </div>
+  );
+}
+
+function LegRow({ leg }: { leg: BoardLeg }) {
+  const started = leg.game.state !== "pre";
+  // Four quarters each have their own number, so the headline is how many of them are in the bag.
+  const headline = leg.quarters ? `${leg.quarters.filter((q) => q.status === "hit").length}/4` : leg.value;
 
   return (
     <li className="py-5 first:pt-0 last:pb-0">
@@ -730,23 +747,36 @@ function LegRow({ leg }: { leg: BoardLeg }) {
         </Avatar>
         <p className="min-w-0 flex-1 truncate font-semibold leading-[1.24]">{leg.playerName}</p>
         <p className={cn("shrink-0 font-heading type-lead font-semibold tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
-          {started ? leg.value : "–"}
+          {started ? headline : "–"}
         </p>
       </div>
       <p className="mt-2 type-caption text-muted-foreground">
         <span className="capitalize">{leg.direction}</span> {leg.line} {lowerFirst(leg.statLabel)}
+        {leg.periodLabel && `, ${lowerFirst(leg.periodLabel)}`}
         <span className="mx-1.5">·</span>
         {[leg.position, leg.team].filter(Boolean).join(", ")}
       </p>
 
-      <div className="relative mt-3">
-        <Progress
-          value={fill}
-          aria-label={`${leg.value} of ${leg.line} ${lowerFirst(leg.statLabel)}`}
-          indicatorClassName={leg.status === "live" ? liveFill : statusFill}
-        />
-        <span className="absolute -top-1 h-3.5 w-0.5 rounded-full bg-foreground" style={{ left: `${MARKER_AT}%` }} />
-      </div>
+      {leg.quarters ? (
+        <ol className="mt-3 grid grid-cols-4 gap-4">
+          {leg.quarters.map((quarter, i) => {
+            const quarterStarted = quarter.status !== "pending";
+            return (
+              <li key={i}>
+                <LegBar leg={leg} value={quarter.value} status={quarter.status} started={quarterStarted} />
+                <p className="mt-2 flex justify-between type-fine text-muted-foreground">
+                  <span>Q{i + 1}</span>
+                  <span className={cn("tabular-nums", quarterStarted && "text-foreground")}>{quarterStarted ? quarter.value : "–"}</span>
+                </p>
+              </li>
+            );
+          })}
+        </ol>
+      ) : (
+        <div className="mt-3">
+          <LegBar leg={leg} value={leg.value} status={leg.status} started={started} />
+        </div>
+      )}
 
       <p className="mt-2.5 flex justify-between type-fine text-muted-foreground">
         <span>{leg.game.score ?? leg.game.label}</span>

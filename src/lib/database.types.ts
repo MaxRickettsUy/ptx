@@ -46,9 +46,11 @@ export type Database = {
           id: string
           line: number
           parlay_id: string
+          period: string
           player_name: string
           player_position: string | null
           position_in_parlay: number
+          quarter_values: number[] | null
           result: string | null
           stat: string
           team_abbr: string | null
@@ -64,9 +66,11 @@ export type Database = {
           id?: string
           line: number
           parlay_id: string
+          period?: string
           player_name: string
           player_position?: string | null
           position_in_parlay?: number
+          quarter_values?: number[] | null
           result?: string | null
           stat: string
           team_abbr?: string | null
@@ -82,9 +86,11 @@ export type Database = {
           id?: string
           line?: number
           parlay_id?: string
+          period?: string
           player_name?: string
           player_position?: string | null
           position_in_parlay?: number
+          quarter_values?: number[] | null
           result?: string | null
           stat?: string
           team_abbr?: string | null
