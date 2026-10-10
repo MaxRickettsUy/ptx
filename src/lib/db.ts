@@ -43,6 +43,7 @@ export type ParlayRow = {
   notes: string | null;
   result: "won" | "lost" | "push" | null;
   settled_at: string | null;
+  marked_lost_at: string | null;
   created_at: string;
   legs: LegRow[];
 };
@@ -85,6 +86,15 @@ export async function createParlay(input: {
 
 export async function deleteParlay(id: string): Promise<void> {
   const { error } = await db().from("parlays").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+/** Writes a slip off by hand, or clears that so it follows its legs again. */
+export async function setMarkedLost(id: string, markedLost: boolean): Promise<void> {
+  const { error } = await db()
+    .from("parlays")
+    .update({ marked_lost_at: markedLost ? new Date().toISOString() : null })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 }
 

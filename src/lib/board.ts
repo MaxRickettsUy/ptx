@@ -1,6 +1,7 @@
 import "server-only";
 
 import { listParlays, settleLeg, settleParlay, type LegRow } from "./db";
+import { demoGameStats, isDemoEvent } from "./demo";
 import { getGameStats, getScoreboard, type Game, type GameStats } from "./espn";
 import { gradeLeg, gradeParlay, type Direction, type GameState, type LegStatus, type ParlayStatus } from "./grade";
 import { EMPTY_LINE, STATS, isStatKey } from "./stats";
@@ -30,6 +31,8 @@ export type BoardParlay = {
   name: string;
   notes: string | null;
   createdAt: string;
+  /** True when the user wrote this slip off by hand rather than the box score deciding it. */
+  markedLost: boolean;
   status: ParlayStatus;
   legs: BoardLeg[];
 };
@@ -69,7 +72,7 @@ export async function getBoard(): Promise<Board> {
       .filter((id) => slate.get(id)?.state !== "pre")
       .map(async (id) => {
         try {
-          stats.set(id, await getGameStats(id));
+          stats.set(id, isDemoEvent(id) ? demoGameStats(id, new Date()) : await getGameStats(id));
         } catch (error) {
           problems.push(`Stats unavailable for event ${id}: ${(error as Error).message}`);
         }
@@ -128,10 +131,14 @@ export async function getBoard(): Promise<Board> {
       };
     });
 
-    const status = gradeParlay(legs.map((l) => l.status));
+    const graded = gradeParlay(legs.map((l) => l.status));
+    const markedLost = parlay.marked_lost_at !== null;
+    // A hand-written-off slip reads as lost, but its legs keep updating and the stored result
+    // still records what the box score eventually says.
+    const status = markedLost ? "lost" : graded;
     const allFinal = legs.length > 0 && legs.every((l) => l.game.state === "post" && l.status !== "pending" && l.status !== "live");
-    if (!parlay.result && allFinal && status !== "pending" && status !== "live") {
-      writes.push(settleParlay(parlay.id, status).catch((error) => void problems.push(`Could not settle parlay: ${error.message}`)));
+    if (!parlay.result && allFinal && graded !== "pending" && graded !== "live") {
+      writes.push(settleParlay(parlay.id, graded).catch((error) => void problems.push(`Could not settle parlay: ${error.message}`)));
     }
 
     return {
@@ -139,6 +146,7 @@ export async function getBoard(): Promise<Board> {
       name: parlay.name,
       notes: parlay.notes,
       createdAt: parlay.created_at,
+      markedLost,
       status,
       legs,
     };

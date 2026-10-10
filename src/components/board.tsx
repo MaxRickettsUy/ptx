@@ -1,6 +1,6 @@
 "use client";
 
-import { Circle, CircleCheck, CircleX } from "lucide-react";
+import { ChevronDown, Circle, CircleCheck, CircleX } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -37,6 +37,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
+import { useCollapsed } from "@/hooks/use-collapsed";
 import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
 import { cn } from "@/lib/utils";
@@ -73,6 +74,19 @@ export function Board() {
     };
   }, [refresh, anyLive]);
 
+  async function markLost(parlay: BoardParlay, markedLost: boolean) {
+    const res = await fetch(`/api/parlays/${parlay.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markedLost }),
+    });
+    if (!res.ok) {
+      setError("Couldn't update that slip.");
+      return;
+    }
+    refresh();
+  }
+
   async function remove(parlay: BoardParlay) {
     const res = await fetch(`/api/parlays/${parlay.id}`, { method: "DELETE" });
     if (!res.ok) {
@@ -106,40 +120,32 @@ export function Board() {
         ) : (
           <section className="flex-1 px-5 py-20 xl:min-h-0 xl:pt-14 xl:pb-5">
             <div className="mx-auto w-full max-w-[1320px] xl:flex xl:h-full xl:flex-col">
-              <header className="text-center">
-                <h1 className="font-heading type-display sm:type-hero">{day ? `${day.label}.` : "Your parlays."}</h1>
-                <p className="mt-3 type-tagline text-muted-foreground sm:type-lead">
-                  {day
-                    ? `${day.parlays.length} ${day.parlays.length === 1 ? "slip" : "slips"}.`
-                    : days.length === 0
-                      ? "Nothing on the board yet."
-                      : "No slips on that day."}
-                </p>
-              </header>
+              <h1 className="font-heading type-display sm:type-hero">{day ? `${day.label}.` : "Your parlays."}</h1>
 
               {problem && (
-                <p className="mx-auto mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
+                <p className="mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
                   {problem}
                 </p>
               )}
 
               {days.length === 0 && (
-                <p className="mx-auto mt-8 max-w-md text-center text-muted-foreground">
-                  Open Claude Code in this project and run{" "}
+                <p className="mt-6 max-w-md text-muted-foreground">
+                  Nothing on the board yet. Open Claude Code in this project and run{" "}
                   <code className="rounded-xs bg-track px-1.5 py-0.5 font-mono type-caption text-foreground">/parlay</code>.
                   Once you approve a slip it appears here and tracks itself.
                 </p>
               )}
 
               {!day && days.length > 0 && (
-                <p className="mt-8 text-center">
+                <p className="mt-6 text-muted-foreground">
+                  No slips on that day.{" "}
                   <Button variant="link" nativeButton={false} render={<Link href="/" />}>
                     Show {days[0].label}
                   </Button>
                 </p>
               )}
 
-              {day && <Lanes parlays={day.parlays} onDelete={remove} />}
+              {day && <Lanes parlays={day.parlays} onDelete={remove} onMarkLost={markLost} />}
             </div>
           </section>
         )}
@@ -216,13 +222,18 @@ const LANES: { title: string; empty: string; statuses: ParlayStatus[]; className
   { title: "Settled", empty: "Nothing settled yet.", statuses: ["won", "lost", "push"] },
 ];
 
-function Lanes({ parlays, onDelete }: { parlays: BoardParlay[]; onDelete: (p: BoardParlay) => void }) {
+type SlipActions = {
+  onDelete: (parlay: BoardParlay) => void;
+  onMarkLost: (parlay: BoardParlay, markedLost: boolean) => void;
+};
+
+function Lanes({ parlays, onDelete, onMarkLost }: { parlays: BoardParlay[] } & SlipActions) {
   return (
     <div className="mt-12 grid items-start gap-5 xl:mt-10 xl:min-h-0 xl:flex-1 xl:grid-cols-3 xl:grid-rows-[minmax(0,1fr)]">
       {LANES.map((lane) => {
         const slips = parlays.filter((p) => lane.statuses.includes(p.status));
         return (
-          <section key={lane.title} className={cn("rounded-xl bg-black/30 p-3 xl:flex xl:max-h-full xl:flex-col", lane.className)} aria-label={lane.title}>
+          <section key={lane.title} className={cn("rounded-xl bg-black/30 p-3 xl:flex xl:h-full xl:flex-col", lane.className)} aria-label={lane.title}>
             <h2 className="flex shrink-0 items-baseline justify-between px-3 pt-2 pb-4 font-heading type-tagline font-semibold">
               {lane.title}
               <span className="type-caption font-normal text-muted-foreground tabular-nums">{slips.length}</span>
@@ -232,9 +243,9 @@ function Lanes({ parlays, onDelete }: { parlays: BoardParlay[]; onDelete: (p: Bo
                 {lane.empty}
               </p>
             ) : (
-              <div data-slot="lane-body" className="grid gap-3 md:grid-cols-2 xl:flex xl:min-h-0 xl:flex-col xl:overflow-y-auto xl:overscroll-contain">
+              <div data-slot="lane-body" className="grid gap-3 lg:grid-cols-2 xl:flex xl:min-h-0 xl:flex-col xl:overflow-y-auto xl:overscroll-contain">
                 {slips.map((parlay) => (
-                  <ParlayCard key={parlay.id} parlay={parlay} onDelete={() => onDelete(parlay)} />
+                  <ParlayCard key={parlay.id} parlay={parlay} onDelete={onDelete} onMarkLost={onMarkLost} />
                 ))}
               </div>
             )}
@@ -253,40 +264,118 @@ const PARLAY_BADGE: Record<ParlayStatus, { label: string; variant: "default" | "
   push: { label: "Push", variant: "secondary", className: "text-muted-foreground" },
 };
 
-function ParlayCard({ parlay, onDelete }: { parlay: BoardParlay; onDelete: () => void }) {
+const STATUS_DOT: Record<ParlayStatus, string> = {
+  pending: "bg-muted-foreground/50",
+  live: "animate-pulse-soft bg-primary",
+  won: "bg-hit",
+  lost: "bg-miss",
+  push: "bg-muted-foreground",
+};
+
+function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & SlipActions) {
   const badge = PARLAY_BADGE[parlay.status];
   const hits = parlay.legs.filter((l) => l.status === "hit").length;
+  const [collapsed, toggleCollapsed] = useCollapsed(parlay.id);
+  const statusLabel = parlay.markedLost ? "Marked lost" : badge.label;
 
   return (
     // In a lane, a slip shrinks to fit the space and scrolls its own legs, so the scrollbar stays
-    // between the header and footer. One-leg slips never shrink; there is nothing worth scrolling.
-    <Card className={cn("gap-0 rounded-none pt-0", parlay.legs.length <= 1 ? "xl:shrink-0" : "xl:min-h-80")}>
-      <CardHeader className="shrink-0 rounded-none border-b pt-(--card-spacing)">
-        <CardTitle>{parlay.name}</CardTitle>
-        {parlay.notes && <CardDescription>{parlay.notes}</CardDescription>}
-        <CardAction>
-          <Badge variant={badge.variant} className={badge.className}>
-            {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
-            {badge.label}
-          </Badge>
+    // between the header and footer. One-leg and collapsed slips never shrink; there is nothing to scroll.
+    <Card
+      className={cn(
+        "@container/slip gap-0 rounded-none pt-0",
+        collapsed ? "pb-0 xl:shrink-0" : parlay.legs.length <= 1 ? "xl:shrink-0" : "xl:min-h-80",
+      )}
+    >
+      {/* The whole header toggles the slip; the chevron is the control keyboards and screen readers use.
+          Collapsed, it becomes two tight lines: the name, then status and tally as plain text, so a
+          narrow card isn't sharing one row between a title, a tally, a badge and a button. */}
+      <CardHeader
+        onClick={toggleCollapsed}
+        className={cn(
+          "shrink-0 cursor-pointer rounded-none has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]",
+          collapsed ? "gap-0.5 py-4" : "border-b pt-(--card-spacing)",
+        )}
+      >
+        <CardTitle className={cn(collapsed && "truncate type-body font-semibold")}>{parlay.name}</CardTitle>
+        {collapsed ? (
+          <CardDescription className="flex items-center gap-1.5 truncate">
+            <span className={cn("size-1.5 shrink-0 rounded-full", STATUS_DOT[parlay.status])} />
+            {statusLabel} · {hits} of {parlay.legs.length} legs hit
+          </CardDescription>
+        ) : (
+          parlay.notes && <CardDescription>{parlay.notes}</CardDescription>
+        )}
+        <CardAction className={cn("flex items-center gap-2", collapsed && "self-center")}>
+          {!collapsed && (
+            <Badge variant={badge.variant} className={badge.className}>
+              {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
+              {statusLabel}
+            </Badge>
+          )}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-expanded={!collapsed}
+            aria-controls={`slip-body-${parlay.id}`}
+            aria-label={collapsed ? `Expand ${parlay.name}` : `Collapse ${parlay.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleCollapsed();
+            }}
+            className="-mr-2 text-muted-foreground"
+          >
+            <ChevronDown className={cn("transition-transform", collapsed && "-rotate-90")} />
+          </Button>
         </CardAction>
       </CardHeader>
 
-      <CardContent data-slot="slip-legs" className="py-5 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain">
-        <ul className="divide-y">
-          {parlay.legs.map((leg) => (
-            <LegRow key={leg.id} leg={leg} />
-          ))}
-        </ul>
-      </CardContent>
+      {!collapsed && (
+        <CardContent
+          id={`slip-body-${parlay.id}`}
+          data-slot="slip-legs"
+          className="py-5 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:overscroll-contain"
+        >
+          <ul className="divide-y">
+            {parlay.legs.map((leg) => (
+              <LegRow key={leg.id} leg={leg} />
+            ))}
+          </ul>
+        </CardContent>
+      )}
 
-      <CardFooter className="shrink-0 justify-between rounded-none type-fine text-muted-foreground">
-        <span>
-          {hits} of {parlay.legs.length} legs hit · Added{" "}
+      {!collapsed && <SlipFooter parlay={parlay} hits={hits} onDelete={onDelete} onMarkLost={onMarkLost} />}
+    </Card>
+  );
+}
+
+function SlipFooter({ parlay, hits, onDelete, onMarkLost }: { parlay: BoardParlay; hits: number } & SlipActions) {
+  const linkClass = "h-auto px-0 type-fine";
+  return (
+    <CardFooter className="shrink-0 justify-between gap-4 rounded-none type-fine text-muted-foreground">
+      {/* Everything here stays on one line: the date drops out when the card is narrow (a phone,
+          or three lanes on a small laptop), and the tally truncates before the actions ever wrap. */}
+      <span className="min-w-0 truncate">
+        {hits} of {parlay.legs.length} legs hit
+        <span className="hidden @[22rem]/slip:inline">
+          {" · Added "}
           {new Date(parlay.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
         </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-4 whitespace-nowrap">
+        {/* Writing a slip off is one click because Reopen undoes it; only deleting asks first. */}
+        {parlay.status === "live" && (
+          <Button variant="link" size="sm" className={linkClass} onClick={() => onMarkLost(parlay, true)}>
+            Mark lost
+          </Button>
+        )}
+        {parlay.markedLost && (
+          <Button variant="link" size="sm" className={linkClass} onClick={() => onMarkLost(parlay, false)}>
+            Reopen
+          </Button>
+        )}
         <AlertDialog>
-          <AlertDialogTrigger render={<Button variant="link" size="sm" className="h-auto px-0 type-fine" />}>Delete</AlertDialogTrigger>
+          <AlertDialogTrigger render={<Button variant="link" size="sm" className={linkClass} />}>Delete</AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete “{parlay.name}”?</AlertDialogTitle>
@@ -294,14 +383,14 @@ function ParlayCard({ parlay, onDelete }: { parlay: BoardParlay; onDelete: () =>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
-              <AlertDialogAction size="sm" onClick={onDelete}>
+              <AlertDialogAction size="sm" onClick={() => onDelete(parlay)}>
                 Delete
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </CardFooter>
-    </Card>
+      </span>
+    </CardFooter>
   );
 }
 
