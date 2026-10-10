@@ -283,7 +283,7 @@ function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & 
     // between the header and footer. One-leg and collapsed slips never shrink; there is nothing to scroll.
     <Card
       className={cn(
-        "@container/slip gap-0 rounded-none pt-0",
+        "@container/slip gap-0 rounded-none border-0 pt-0",
         collapsed ? "pb-0 xl:shrink-0" : parlay.legs.length <= 1 ? "xl:shrink-0" : "xl:min-h-80",
       )}
     >
@@ -304,15 +304,17 @@ function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & 
             {statusLabel} · {hits} of {parlay.legs.length} legs hit
           </CardDescription>
         ) : (
-          parlay.notes && <CardDescription>{parlay.notes}</CardDescription>
-        )}
-        <CardAction className={cn("flex items-center gap-2", collapsed && "self-center")}>
-          {!collapsed && (
+          // The badge and note get the card's full width on their own rows, so the name only
+          // shares its row with the chevron and neither has to wrap around the other.
+          <div className="col-span-2 mt-1.5 flex flex-col items-start gap-2">
             <Badge variant={badge.variant} className={badge.className}>
               {parlay.status === "live" && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
               {statusLabel}
             </Badge>
-          )}
+            {parlay.notes && <CardDescription>{parlay.notes}</CardDescription>}
+          </div>
+        )}
+        <CardAction className={cn("flex items-center", collapsed ? "self-center" : "row-span-1")}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -323,7 +325,7 @@ function ParlayCard({ parlay, onDelete, onMarkLost }: { parlay: BoardParlay } & 
               event.stopPropagation();
               toggleCollapsed();
             }}
-            className="-mr-2 text-muted-foreground"
+            className="-mr-2 text-muted-foreground aria-expanded:bg-transparent aria-expanded:text-muted-foreground hover:aria-expanded:bg-muted"
           >
             <ChevronDown className={cn("transition-transform", collapsed && "-rotate-90")} />
           </Button>
