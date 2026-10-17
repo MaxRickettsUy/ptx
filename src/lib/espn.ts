@@ -95,14 +95,65 @@ export function headshotUrl(athleteId: string, size = 96): string | null {
   return `https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/${athleteId}.png&w=${size}&h=${size}&scale=crop`;
 }
 
-export async function getScoreboard(week?: number): Promise<{ week: number; games: Game[] }> {
+function scoreboardData(week?: number, ttl = 15 * SECOND): Promise<any> {
   const query = week ? `?seasontype=2&week=${week}` : "";
-  return cached(`scoreboard:${week ?? "current"}`, 15 * SECOND, async () => {
-    const data = await getJson(`${SITE}/scoreboard${query}`);
-    const weekNumber: number = data.week?.number ?? week ?? 0;
-    const games: Game[] = (data.events ?? []).map((event: any) => toGame(event.competitions[0], weekNumber));
-    return { week: weekNumber, games };
+  return cached(`scoreboard:${week ?? "current"}:${ttl}`, ttl, () => getJson(`${SITE}/scoreboard${query}`));
+}
+
+export async function getScoreboard(week?: number): Promise<{ week: number; games: Game[] }> {
+  const data = await scoreboardData(week);
+  const weekNumber: number = data.week?.number ?? week ?? 0;
+  const games: Game[] = (data.events ?? []).map((event: any) => toGame(event.competitions[0], weekNumber));
+  return { week: weekNumber, games };
+}
+
+export type ScoreTeam = TeamSide & { name: string; record: string | null; quarters: number[] };
+
+export type ScoreGame = Omit<Game, "home" | "away"> & { home: ScoreTeam; away: ScoreTeam; total: number };
+
+export type WeekScores = {
+  week: number;
+  /** The regular-season week being played now, or null outside the regular season. */
+  currentWeek: number | null;
+  /** How many weeks the regular season has. */
+  weeks: number;
+  games: ScoreGame[];
+  /** Abbreviations of the teams with no game this week. */
+  byes: string[];
+};
+
+/**
+ * Every regular-season game in a week, with each side's points by quarter. Defaults to the current week.
+ * A week that's over can pass a longer `ttl`, since its scores won't change.
+ */
+export async function getWeekScores(week?: number, ttl?: number): Promise<WeekScores> {
+  const [data, current] = await Promise.all([scoreboardData(week, ttl), week ? scoreboardData() : null]);
+  const now = current ?? data;
+  const weekNumber: number = data.week?.number ?? week ?? 0;
+  const regular = (data.leagues?.[0]?.calendar ?? []).find((c: any) => String(c.value) === "2");
+
+  const games = (data.events ?? []).map((event: any): ScoreGame => {
+    const competition = event.competitions[0];
+    const game = toGame(competition, weekNumber);
+    const side = (base: TeamSide): ScoreTeam => {
+      const c = competition.competitors.find((x: any) => String(x.team.id) === base.id);
+      return {
+        ...base,
+        name: c.team.shortDisplayName ?? c.team.displayName ?? base.abbr,
+        record: c.records?.[0]?.summary ?? null,
+        quarters: (c.linescores ?? []).map((l: any) => num(l.value)),
+      };
+    };
+    return { ...game, home: side(game.home), away: side(game.away), total: game.home.score + game.away.score };
   });
+
+  return {
+    week: weekNumber,
+    currentWeek: now.season?.type === 2 ? (now.week?.number ?? null) : null,
+    weeks: regular?.entries?.length || 18,
+    games,
+    byes: (data.week?.teamsOnBye ?? []).map((t: any) => t.abbreviation),
+  };
 }
 
 // Maps the boxscore's per-category `keys` onto our flat stat line.

@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { PanelHeader, SectionNav } from "@/components/section-nav";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   Sidebar,
@@ -30,7 +31,6 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
-  SidebarHeader,
   SidebarInset,
   SidebarMenu,
   SidebarMenuBadge,
@@ -249,23 +249,9 @@ function SidePanel({ board, days, activeKey }: { board: BoardData | null; days: 
 
   return (
     <Sidebar>
-      {/* Safari on the Mac lays a translucent strip of its toolbar over the top ~40px of the page,
-          so on desktop the panel's content starts below that, level with the main column's padding. */}
-      <SidebarHeader className="gap-1 px-4 pt-5 pb-3 md:pt-14">
-        <p className="font-heading type-tagline font-semibold">ptx</p>
-        <p className="flex items-center gap-2 type-fine text-muted-foreground">
-          {board?.anyLive && (
-            <span className="flex items-center gap-1.5 text-primary">
-              <span className="size-1.5 animate-pulse-soft rounded-full bg-primary" />
-              Live
-            </span>
-          )}
-          {board
-            ? `Updated ${new Date(board.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-            : "Loading…"}
-        </p>
-      </SidebarHeader>
+      <PanelHeader live={board?.anyLive ?? false} fetchedAt={board?.fetchedAt ?? null} />
       <SidebarContent>
+        <SectionNav />
         {group("Upcoming", days.filter((d) => !d.past))}
         {group("Earlier", days.filter((d) => d.past))}
       </SidebarContent>
