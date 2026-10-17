@@ -1,4 +1,5 @@
 import { deleteParlay, setDetails, setMarkedLost } from "@/lib/db";
+import { isModel } from "@/lib/labels";
 import { isAmericanOdds, isMultiplier } from "@/lib/odds";
 
 export async function DELETE(_req: Request, ctx: RouteContext<"/api/parlays/[id]">) {
@@ -16,7 +17,8 @@ const isAmount = (value: unknown): value is number | null =>
 
 // Accepts either { markedLost } or { wager, odds, multiplier, payout, labels? }; in the second
 // form every stake value is sent, with null clearing it. A slip is priced by odds or a
-// multiplier, not both. Labels are { human, model, mock } and are left alone when omitted.
+// multiplier, not both. Labels are { human, model, mock }, where model is "claude", "chatgpt" or
+// null, and are left alone when omitted.
 export async function PATCH(req: Request, ctx: RouteContext<"/api/parlays/[id]">) {
   const { id } = await ctx.params;
   const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
@@ -43,14 +45,19 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/parlays/[id]">
         return Response.json({ error: "Give American odds or a multiple, not both." }, { status: 400 });
       }
       const labels = body.labels as Record<string, unknown> | undefined;
-      const flags = labels && [labels.human, labels.model, labels.mock];
-      if (flags && !flags.every((flag) => typeof flag === "boolean")) {
-        return Response.json({ error: "Labels must be { human, model, mock } booleans." }, { status: 400 });
+      if (
+        labels &&
+        !(typeof labels.human === "boolean" && typeof labels.mock === "boolean" && (labels.model === null || isModel(labels.model)))
+      ) {
+        return Response.json(
+          { error: 'Labels must be { human, mock } booleans and model "claude", "chatgpt" or null.' },
+          { status: 400 },
+        );
       }
       await setDetails(
         id,
         { wager, odds, multiplier, payout },
-        flags ? { human: flags[0] as boolean, model: flags[1] as boolean, mock: flags[2] as boolean } : undefined,
+        labels ? { human: labels.human as boolean, model: isModel(labels.model) ? labels.model : null, mock: labels.mock as boolean } : undefined,
       );
       return new Response(null, { status: 204 });
     }

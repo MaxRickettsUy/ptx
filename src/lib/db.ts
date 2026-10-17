@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
 import type { Direction } from "./grade";
-import type { SlipLabels } from "./labels";
+import { isModel, type SlipLabels } from "./labels";
 
 function env(name: string): string {
   const value = process.env[name];
@@ -53,7 +53,7 @@ export type ParlayRow = {
   multiplier: number | null;
   payout: number | null;
   by_human: boolean;
-  by_model: boolean;
+  model: string | null;
   is_mock: boolean;
   created_at: string;
   legs: LegRow[];
@@ -74,7 +74,10 @@ export async function listParlays(): Promise<ParlayRow[]> {
 
 export type Stake = { wager: number | null; odds: number | null; multiplier: number | null; payout: number | null };
 
-const labelColumns = (labels: SlipLabels) => ({ by_human: labels.human, by_model: labels.model, is_mock: labels.mock });
+const labelColumns = (labels: SlipLabels) => ({ by_human: labels.human, model: labels.model, is_mock: labels.mock });
+
+/** The stored model name, or null for one the app no longer knows. */
+export const modelOf = (row: ParlayRow) => (isModel(row.model) ? row.model : null);
 
 export async function createParlay(input: {
   name: string;

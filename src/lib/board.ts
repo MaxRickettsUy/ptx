@@ -1,6 +1,6 @@
 import "server-only";
 
-import { listParlays, settleLeg, settleParlay, type LegRow } from "./db";
+import { listParlays, modelOf, settleLeg, settleParlay, type LegRow } from "./db";
 import { demoGameStats, demoQuarterStats, isDemoEvent } from "./demo";
 import { getGameStats, getQuarterStats, getScoreboard, headshotUrl, type Game, type GameStats, type QuarterStats } from "./espn";
 import { gradeLeg, gradeParlay, gradeQuarters, type Direction, type GameState, type LegStatus, type ParlayStatus } from "./grade";
@@ -247,7 +247,7 @@ export async function getBoard(): Promise<Board> {
       multiplier,
       payout,
       payoutEntered: parlay.payout !== null,
-      labels: { human: parlay.by_human, model: parlay.by_model, mock: parlay.is_mock },
+      labels: { human: parlay.by_human, model: modelOf(parlay), mock: parlay.is_mock },
       status,
       legs,
     };

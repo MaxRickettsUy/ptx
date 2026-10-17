@@ -2,6 +2,9 @@
 
 import { Circle, CircleCheck, CircleX } from "lucide-react";
 import Link from "next/link";
+import type { IconType } from "react-icons";
+import { BsOpenai } from "react-icons/bs";
+import { SiClaude } from "react-icons/si";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -45,7 +48,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useStoredFlag } from "@/hooks/use-stored-flag";
 import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
-import { LABELS, type SlipLabels } from "@/lib/labels";
+import { FLAGS, MODEL_HINT, MODELS, type Model, type SlipLabels } from "@/lib/labels";
 import { formatMoney, formatPrice, impliedPayout, parsePrice } from "@/lib/odds";
 import { cn } from "@/lib/utils";
 
@@ -466,14 +469,37 @@ function SlipDetail({ parlay, inSheet = false, onDelete, onMarkLost, onSetStake 
   );
 }
 
+// Simple Icons no longer carries OpenAI's marks, so ChatGPT's comes from Bootstrap Icons.
+// Claude's is drawn in its brand orange; OpenAI's mark is monochrome, so it takes the text colour.
+const MODEL_ICON: Record<Model, { icon: IconType; className?: string }> = {
+  claude: { icon: SiClaude, className: "text-[#D97757]" },
+  chatgpt: { icon: BsOpenai },
+};
+
+function ModelIcon({ model }: { model: Model }) {
+  const { icon: Icon, className } = MODEL_ICON[model];
+  return <Icon aria-hidden className={cn("size-[1em] shrink-0", className)} />;
+}
+
+// One mark per label, in a fixed order: who built it (person, then model), then whether it was real.
+function labelMarks(labels: SlipLabels) {
+  const [human, mock] = FLAGS;
+  const model = MODELS.find((m) => m.key === labels.model);
+  return [
+    labels.human && { key: human.key, name: human.name, hint: human.hint, mark: human.emoji },
+    model && { key: model.key, name: model.name, hint: `${model.name} ${MODEL_HINT}`, mark: <ModelIcon model={model.key} /> },
+    labels.mock && { key: mock.key, name: mock.name, hint: mock.hint, mark: mock.emoji },
+  ].filter((mark) => mark !== false && mark !== undefined);
+}
+
 function LabelMarks({ labels, className }: { labels: SlipLabels; className?: string }) {
-  const shown = LABELS.filter((label) => labels[label.key]);
+  const shown = labelMarks(labels);
   if (shown.length === 0) return null;
   return (
     <span className={cn("inline-flex items-center gap-1", className)}>
       {shown.map((label) => (
-        <span key={label.key} role="img" aria-label={label.name} title={`${label.name}: ${label.hint}`}>
-          {label.emoji}
+        <span key={label.key} role="img" aria-label={label.name} title={`${label.name}: ${label.hint}`} className="inline-flex">
+          {label.mark}
         </span>
       ))}
     </span>
@@ -580,22 +606,34 @@ function StakeDialog({ parlay, onClose, onSave }: { parlay: BoardParlay; onClose
           <fieldset className="grid gap-1.5">
             <legend className="mb-1.5 type-caption text-muted-foreground">Labels</legend>
             <div className="flex flex-wrap gap-2">
-              {LABELS.map((label) => (
+              {/* Claude and ChatGPT are one label with two values, so turning one on turns the other off. */}
+              {[
+                { ...FLAGS[0], mark: FLAGS[0].emoji, on: labels.human, toggle: () => setLabels({ ...labels, human: !labels.human }) },
+                ...MODELS.map((model) => ({
+                  key: model.key,
+                  name: model.name,
+                  hint: `${model.name} ${MODEL_HINT}`,
+                  mark: <ModelIcon model={model.key} />,
+                  on: labels.model === model.key,
+                  toggle: () => setLabels({ ...labels, model: labels.model === model.key ? null : model.key }),
+                })),
+                { ...FLAGS[1], mark: FLAGS[1].emoji, on: labels.mock, toggle: () => setLabels({ ...labels, mock: !labels.mock }) },
+              ].map((chip) => (
                 <button
-                  key={label.key}
+                  key={chip.key}
                   type="button"
-                  aria-pressed={labels[label.key]}
-                  title={label.hint}
-                  onClick={() => setLabels({ ...labels, [label.key]: !labels[label.key] })}
+                  aria-pressed={chip.on}
+                  title={chip.hint}
+                  onClick={chip.toggle}
                   className={cn(
-                    "cursor-pointer rounded-full border px-3 py-1.5 type-caption transition-colors",
-                    labels[label.key] ? "border-primary bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground",
+                    "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 type-caption transition-colors",
+                    chip.on ? "border-primary bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <span aria-hidden className="mr-1.5">
-                    {label.emoji}
+                  <span aria-hidden className="inline-flex">
+                    {chip.mark}
                   </span>
-                  {label.name}
+                  {chip.name}
                 </button>
               ))}
             </div>

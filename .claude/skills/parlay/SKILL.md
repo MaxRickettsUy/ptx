@@ -37,6 +37,7 @@ Every slip is labelled with who built it, so set these honestly from how the con
 
 - `human_involved`: true if the user picked or changed any legs themselves (named a player, swapped a market, flipped a direction). Supplying lines and saying yes doesn't count on its own.
 - `model_involved`: true if you proposed or shaped any legs. It's false only when the user dictated the whole slip and you just recorded it.
+- `model`: which model you are, so the slip shows your logo: `claude` if you are Claude, `chatgpt` if you are ChatGPT or another OpenAI model. Always pass it along with `model_involved: true`.
 - `mock`: true if this is a what-if slip they aren't actually submitting to a book. If it's not clear whether they're placing it, ask.
 
 A slip you worked out together has both of the first two set.

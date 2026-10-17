@@ -7,6 +7,7 @@ import path from "node:path";
 import { z } from "zod";
 import { createParlay } from "../src/lib/db";
 import { getGameLog, getGameStats, getInjuries, getRoster, getScoreboard, searchPlayers, type Game } from "../src/lib/espn";
+import { MODELS, type Model } from "../src/lib/labels";
 import { PERIOD_KEYS, STAT_KEYS, STATS } from "../src/lib/stats";
 
 process.loadEnvFile(path.join(import.meta.dirname, "..", ".env.local"));
@@ -14,6 +15,14 @@ process.loadEnvFile(path.join(import.meta.dirname, "..", ".env.local"));
 const BOARD_URL = "http://localhost:3000";
 
 const server = new McpServer({ name: "parlay", version: "0.1.0" });
+
+// When the model doesn't say which it is, go by the connecting client: Codex and other OpenAI
+// clients count as ChatGPT, and anything else is taken to be Claude Code, which is what
+// .mcp.json and /parlay are set up for.
+function connectedModel(): Model {
+  const client = server.server.getClientVersion()?.name ?? "";
+  return /codex|openai|chatgpt/i.test(client) ? "chatgpt" : "claude";
+}
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
 
@@ -116,7 +125,13 @@ server.registerTool(
         .describe("True if the user chose or shaped any of the legs themselves, beyond supplying lines and approving. Shown on the slip as 🧑."),
       model_involved: z
         .boolean()
-        .describe("True if you proposed or shaped any of the legs. False only when the user dictated the whole slip and you just recorded it. Shown as 🤖."),
+        .describe("True if you proposed or shaped any of the legs. False only when the user dictated the whole slip and you just recorded it. Shown on the slip as your logo."),
+      model: z
+        .enum(MODELS.map((m) => m.key) as [Model, ...Model[]])
+        .optional()
+        .describe(
+          "Which model you are, so the slip shows the right logo: claude if you are Claude (Anthropic), chatgpt if you are ChatGPT or another OpenAI model. Only used when model_involved is true.",
+        ),
       mock: z
         .boolean()
         .optional()
@@ -160,7 +175,7 @@ server.registerTool(
         .max(15),
     },
   },
-  ({ name, notes, human_involved, model_involved, mock, wager, odds, multiplier, payout, legs }) =>
+  ({ name, notes, human_involved, model_involved, model, mock, wager, odds, multiplier, payout, legs }) =>
     respond(async () => {
       const problems: string[] = [];
       if (odds !== undefined && multiplier !== undefined) {
@@ -208,7 +223,7 @@ server.registerTool(
         notes: notes ?? null,
         legs: valid,
         stake: { wager: wager ?? null, odds: odds ?? null, multiplier: multiplier ?? null, payout: payout ?? null },
-        labels: { human: human_involved, model: model_involved, mock: mock ?? false },
+        labels: { human: human_involved, model: model_involved ? (model ?? connectedModel()) : null, mock: mock ?? false },
       });
       return { saved: true, parlay_id: parlayId, board_url: BOARD_URL, legs: valid };
     }),
