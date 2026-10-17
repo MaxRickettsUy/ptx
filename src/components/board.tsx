@@ -45,7 +45,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { Board as BoardData, BoardLeg, BoardParlay } from "@/lib/board";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { useStoredFlag } from "@/hooks/use-stored-flag";
+import { useStoredFlag, useStoredValue } from "@/hooks/use-stored-flag";
 import { groupByDay, type DayGroup } from "@/lib/days";
 import type { LegStatus, ParlayStatus } from "@/lib/grade";
 import { FLAGS, MODEL_HINT, MODELS, type Model, type SlipLabels } from "@/lib/labels";
@@ -137,7 +137,8 @@ export function Board() {
   // Whether the left panel is showing on desktop; remembered across reloads.
   const [panelOpen, setPanelOpen] = useStoredFlag("parlay-board:side-panel-open", true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const slips = day?.parlays ?? [];
+  const [sort, setSort] = useStoredValue<SlipSort>("parlay-board:sort", "kickoff:asc", isSlipSort);
+  const slips = sortSlips(day?.parlays ?? [], sort);
   const selected =
     slips.find((p) => p.id === selectedId) ??
     (hasDetailColumn ? (slips.find((p) => p.status === "live") ?? slips[0] ?? null) : null);
@@ -187,6 +188,7 @@ export function Board() {
                 </p>
               )}
 
+              {day && <SortBar sort={sort} onSort={setSort} />}
               {day && <Lanes parlays={slips} selectedId={selected?.id ?? null} onSelect={setSelectedId} />}
             </div>
 
@@ -282,6 +284,65 @@ type SlipActions = {
   onSetStake: (parlay: BoardParlay, stake: Stake) => void;
 };
 
+// How the lanes are ordered, as "key:direction". Kickoff is the day's own order, soonest first.
+const SORT_KEYS = [
+  { key: "kickoff", label: "Kickoff", value: null },
+  { key: "legs", label: "Legs", value: (p: BoardParlay) => p.legs.length },
+  { key: "payout", label: "Payout", value: (p: BoardParlay) => p.payout },
+  { key: "wager", label: "Wager", value: (p: BoardParlay) => p.wager },
+] as const;
+
+type SortKey = (typeof SORT_KEYS)[number]["key"];
+type SlipSort = `${SortKey}:${"asc" | "desc"}`;
+
+function isSlipSort(value: string): value is SlipSort {
+  const [key, direction] = value.split(":");
+  return SORT_KEYS.some((s) => s.key === key) && (direction === "asc" || direction === "desc");
+}
+
+// Slips with no wager or payout go last whichever way the sort runs; ties keep kickoff order.
+function sortSlips(parlays: BoardParlay[], sort: SlipSort): BoardParlay[] {
+  const [key, direction] = sort.split(":") as [SortKey, "asc" | "desc"];
+  const value = SORT_KEYS.find((s) => s.key === key)?.value;
+  if (!value) return direction === "desc" ? [...parlays].reverse() : parlays;
+  return [...parlays].sort((a, b) => {
+    const x = value(a);
+    const y = value(b);
+    if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+    return direction === "desc" ? y - x : x - y;
+  });
+}
+
+// A new key sorts high to low (kickoff soonest first); choosing the current one flips it.
+function SortBar({ sort, onSort }: { sort: SlipSort; onSort: (sort: SlipSort) => void }) {
+  const [current, direction] = sort.split(":") as [SortKey, "asc" | "desc"];
+  return (
+    <div role="group" aria-label="Sort slips" className="mt-8 flex flex-wrap items-center gap-1 type-caption xl:mt-6">
+      <span className="mr-1 text-muted-foreground">Sort by</span>
+      {SORT_KEYS.map(({ key, label }) => {
+        const active = key === current;
+        const flipped = direction === "asc" ? "desc" : "asc";
+        const next: SlipSort = active ? `${key}:${flipped}` : `${key}:${key === "kickoff" ? "asc" : "desc"}`;
+        return (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onSort(next)}
+            className={cn(
+              "cursor-pointer rounded-full px-3 py-1 transition-colors",
+              active ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+            {active && <span aria-label={direction === "asc" ? ", ascending" : ", descending"}> {direction === "asc" ? "↑" : "↓"}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Lanes({
   parlays,
   selectedId,
@@ -292,7 +353,7 @@ function Lanes({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div className="mt-12 grid items-start gap-5 xl:mt-10 xl:min-h-0 xl:flex-1 xl:grid-cols-3 xl:grid-rows-[minmax(0,1fr)]">
+    <div className="mt-4 grid items-start gap-5 xl:min-h-0 xl:flex-1 xl:grid-cols-3 xl:grid-rows-[minmax(0,1fr)]">
       {LANES.map((lane) => {
         const slips = parlays.filter((p) => lane.statuses.includes(p.status));
         return (
