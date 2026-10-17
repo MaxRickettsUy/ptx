@@ -58,6 +58,11 @@ function cached<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T>
   return value;
 }
 
+/** Drops cached responses whose key starts with `prefix`, so the next read goes back to ESPN. */
+function forget(prefix: string) {
+  for (const key of cache.keys()) if (key.startsWith(prefix)) cache.delete(key);
+}
+
 async function getJson(url: string): Promise<any> {
   const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15 * SECOND) });
   if (!res.ok) throw new Error(`ESPN responded ${res.status} for ${url}`);
@@ -98,6 +103,13 @@ export function headshotUrl(athleteId: string, size = 96): string | null {
 function scoreboardData(week?: number, ttl = 15 * SECOND): Promise<any> {
   const query = week ? `?seasontype=2&week=${week}` : "";
   return cached(`scoreboard:${week ?? "current"}:${ttl}`, ttl, () => getJson(`${SITE}/scoreboard${query}`));
+}
+
+/** Forgets cached scoreboards: one week's (and the current week's), or every week's when none is given. */
+export function forgetScoreboards(week?: number) {
+  if (week === undefined) return forget("scoreboard:");
+  forget(`scoreboard:${week}:`);
+  forget("scoreboard:current:");
 }
 
 export async function getScoreboard(week?: number): Promise<{ week: number; games: Game[] }> {
