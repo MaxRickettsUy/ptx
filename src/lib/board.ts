@@ -223,6 +223,8 @@ export async function getBoard(): Promise<Board> {
         game: { label: game.label, date: game.date, state: game.state, detail: game.detail, score: score(game) },
       };
     });
+    // A slip reads in the order its games kick off; legs in the same game keep the order they were saved in.
+    legs.sort((a, b) => (Date.parse(a.game.date) || 0) - (Date.parse(b.game.date) || 0));
 
     const graded = gradeParlay(legs.map((l) => l.status));
     const markedLost = parlay.marked_lost_at !== null;
