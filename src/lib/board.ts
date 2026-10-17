@@ -13,6 +13,8 @@ export type BoardLeg = {
   playerName: string;
   headshot: string | null;
   team: string | null;
+  /** Null for the simulated game's made-up teams. */
+  teamLogo: string | null;
   position: string | null;
   statShort: string;
   statLabel: string;
@@ -60,6 +62,11 @@ export type Board = {
   problems: string[];
   fetchedAt: string;
 };
+
+/** Logos are served from public/team-logos, downloaded by `pnpm logos`. */
+function teamLogoPath(abbr: string): string {
+  return `/team-logos/${abbr.toLowerCase()}.png`;
+}
 
 function score(game: Game): string | null {
   if (game.state === "pre") return null;
@@ -126,6 +133,7 @@ export async function getBoard(): Promise<Board> {
         playerName: leg.player_name,
         headshot: headshotUrl(leg.athlete_id),
         team: leg.team_abbr,
+        teamLogo: leg.team_abbr && !isDemoEvent(leg.event_id) ? teamLogoPath(leg.team_abbr) : null,
         position: leg.player_position,
         statShort: def?.short ?? leg.stat,
         statLabel: def?.label ?? leg.stat,

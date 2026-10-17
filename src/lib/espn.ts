@@ -94,6 +94,15 @@ function toGame(competition: any, week: number | null): Game {
   };
 }
 
+/**
+ * A team's logo on ESPN's image CDN, in the version drawn for dark backgrounds. The app serves
+ * copies from public/team-logos instead; `pnpm logos` downloads them from here.
+ */
+export function espnTeamLogoUrl(abbr: string, size = 128): string {
+  const team = encodeURIComponent(abbr.toLowerCase());
+  return `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nfl/500-dark/${team}.png&w=${size}&h=${size}`;
+}
+
 /** Square headshot from ESPN's image CDN, or null for ids that aren't real ESPN athletes. */
 export function headshotUrl(athleteId: string, size = 96): string | null {
   if (!/^\d+$/.test(athleteId)) return null;
@@ -342,7 +351,7 @@ export async function getQuarterStats(eventId: string, finished: boolean): Promi
   });
 }
 
-async function getTeams(): Promise<{ id: string; abbr: string; name: string }[]> {
+export async function getTeams(): Promise<{ id: string; abbr: string; name: string }[]> {
   return cached("teams", 24 * 60 * MINUTE, async () => {
     const data = await getJson(`${SITE}/teams`);
     return data.sports[0].leagues[0].teams.map((t: any) => ({

@@ -1,6 +1,6 @@
 "use client";
 
-import { Circle, CircleCheck, CircleX } from "lucide-react";
+import { Circle, CircleCheck, CircleX, Copy } from "lucide-react";
 import Link from "next/link";
 import type { IconType } from "react-icons";
 import { BsOpenai } from "react-icons/bs";
@@ -359,6 +359,7 @@ function SlipPreview({ parlay, selected, onSelect }: { parlay: BoardParlay; sele
   const stake =
     parlay.wager !== null && parlay.payout !== null ? `${formatMoney(parlay.wager)} pays ${formatMoney(parlay.payout)}` : null;
   const summary = [outcome, stake].filter(Boolean).join(" · ");
+  const teams = slipTeams(parlay);
 
   return (
     <button
@@ -380,13 +381,53 @@ function SlipPreview({ parlay, selected, onSelect }: { parlay: BoardParlay; sele
           <LegMark key={leg.id} status={leg.status} className="size-4" />
         ))}
       </span>
-      {summary && (
-        <span className="flex min-w-0 items-center gap-1.5 type-fine text-muted-foreground">
-          <span className={cn("size-1.5 shrink-0 rounded-full", PREVIEW_DOT[parlay.status])} />
-          <span className="truncate">{summary}</span>
+      {(summary || teams.length > 0) && (
+        <span className="flex min-w-0 items-center justify-between gap-3">
+          {summary && (
+            <span className="flex min-w-0 items-center gap-1.5 type-fine text-muted-foreground">
+              <span className={cn("size-1.5 shrink-0 rounded-full", PREVIEW_DOT[parlay.status])} />
+              <span className="truncate">{summary}</span>
+            </span>
+          )}
+          <TeamLogos teams={teams} className="ml-auto" />
         </span>
       )}
     </button>
+  );
+}
+
+// Each team with a player on the slip, once, in leg order.
+function slipTeams(parlay: BoardParlay): { abbr: string; logo: string }[] {
+  const seen = new Map<string, string>();
+  for (const leg of parlay.legs) if (leg.team && leg.teamLogo && !seen.has(leg.team)) seen.set(leg.team, leg.teamLogo);
+  return [...seen].map(([abbr, logo]) => ({ abbr, logo }));
+}
+
+// A slate-wide slip can span a dozen teams, so past a few the rest are counted instead.
+const MAX_LOGOS = 4;
+
+function TeamLogos({ teams, className }: { teams: { abbr: string; logo: string }[]; className?: string }) {
+  if (teams.length === 0) return null;
+  const shown = teams.slice(0, teams.length > MAX_LOGOS ? MAX_LOGOS - 1 : MAX_LOGOS);
+  const rest = teams.length - shown.length;
+  return (
+    <span className={cn("flex shrink-0 items-center gap-1", className)} title={teams.map((t) => t.abbr).join(", ")}>
+      {shown.map((team) => (
+        // Small local files, so next/image would add nothing. A team with no logo on disk hides its
+        // broken image rather than showing one.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={team.abbr}
+          src={team.logo}
+          alt={team.abbr}
+          width={20}
+          height={20}
+          onError={(e) => (e.currentTarget.hidden = true)}
+          className="size-5 object-contain"
+        />
+      ))}
+      {rest > 0 && <span className="type-fine text-muted-foreground tabular-nums">+{rest}</span>}
+    </span>
   );
 }
 
@@ -661,45 +702,97 @@ function SlipFooter({
 }: { parlay: BoardParlay; hits: number } & Pick<SlipActions, "onDelete" | "onMarkLost">) {
   const linkClass = "h-auto px-0 type-fine";
   return (
-    <CardFooter className="shrink-0 justify-between gap-4 rounded-none type-fine text-muted-foreground">
-      {/* Everything here stays on one line: the date drops out when the card is narrow (a phone,
-          or three lanes on a small laptop), and the tally truncates before the actions ever wrap. */}
-      <span className="min-w-0 truncate">
-        {hits} of {parlay.legs.length} legs hit
-        <span className="hidden @[22rem]/slip:inline">
-          {" · Added "}
-          {new Date(parlay.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
+    <CardFooter className="shrink-0 flex-col items-stretch gap-2 rounded-none type-fine text-muted-foreground">
+      <div className="flex items-center justify-between gap-4">
+        {/* Everything here stays on one line: the date drops out when the card is narrow (a phone,
+            or three lanes on a small laptop), and the tally truncates before the actions ever wrap. */}
+        <span className="min-w-0 truncate">
+          {hits} of {parlay.legs.length} legs hit
+          <span className="hidden @[22rem]/slip:inline">
+            {" · Added "}
+            {new Date(parlay.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
+          </span>
         </span>
-      </span>
-      <span className="flex shrink-0 items-center gap-4 whitespace-nowrap">
-        {/* Writing a slip off is one click because Reopen undoes it; only deleting asks first. */}
-        {parlay.status === "live" && (
-          <Button variant="link" size="sm" className={linkClass} onClick={() => onMarkLost(parlay, true)}>
-            Mark lost
-          </Button>
-        )}
-        {parlay.markedLost && (
-          <Button variant="link" size="sm" className={linkClass} onClick={() => onMarkLost(parlay, false)}>
-            Reopen
-          </Button>
-        )}
-        <AlertDialog>
-          <AlertDialogTrigger render={<Button variant="link" size="sm" className={linkClass} />}>Delete</AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Delete “{parlay.name}”?</AlertDialogTitle>
-              <AlertDialogDescription>The slip and its legs are removed from the board. This can’t be undone.</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
-              <AlertDialogAction size="sm" onClick={() => onDelete(parlay)}>
-                Delete
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </span>
+        <span className="flex shrink-0 items-center gap-4 whitespace-nowrap">
+          {/* Writing a slip off is one click because Reopen undoes it; only deleting asks first. */}
+          {parlay.status === "live" && (
+            <Button variant="link" size="sm" className={linkClass} onClick={() => onMarkLost(parlay, true)}>
+              Mark lost
+            </Button>
+          )}
+          {parlay.markedLost && (
+            <Button variant="link" size="sm" className={linkClass} onClick={() => onMarkLost(parlay, false)}>
+              Reopen
+            </Button>
+          )}
+          <AlertDialog>
+            <AlertDialogTrigger render={<Button variant="link" size="sm" className={linkClass} />}>Delete</AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete “{parlay.name}”?</AlertDialogTitle>
+                <AlertDialogDescription>The slip and its legs are removed from the board. This can’t be undone.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel size="sm">Cancel</AlertDialogCancel>
+                <AlertDialogAction size="sm" onClick={() => onDelete(parlay)}>
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </span>
+      </div>
+      <CopyId id={parlay.id} />
     </CardFooter>
+  );
+}
+
+// The clipboard API only exists on localhost or HTTPS. The board is also opened from phones over
+// plain http on the home network, so fall back to copying a selection there.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const field = document.createElement("textarea");
+    field.value = text;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.append(field);
+    field.select();
+    const copied = document.execCommand("copy");
+    field.remove();
+    return copied;
+  }
+}
+
+// The slip's id, for quoting a slip to an agent or looking it up in the database. Clicking copies it.
+function CopyId({ id }: { id: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    if (state === "idle") return;
+    const timer = setTimeout(() => setState("idle"), 1500);
+    return () => clearTimeout(timer);
+  }, [state]);
+
+  return (
+    <button
+      type="button"
+      title="Copy the slip's id"
+      onClick={async () => setState((await copyText(id)) ? "copied" : "failed")}
+      className="flex min-w-0 cursor-pointer items-center gap-1.5 text-left transition-colors hover:text-foreground"
+    >
+      <span className="min-w-0 truncate font-mono">{id}</span>
+      {state === "idle" ? (
+        <Copy aria-hidden className="size-3 shrink-0" />
+      ) : (
+        <span role="status" className={cn("shrink-0", state === "copied" ? "text-hit" : "text-destructive")}>
+          {state === "copied" ? "Copied" : "Couldn't copy"}
+        </span>
+      )}
+    </button>
   );
 }
 
