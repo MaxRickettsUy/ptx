@@ -191,7 +191,7 @@ export function Board() {
             </div>
 
             {hasDetailColumn && day && (
-              <aside aria-label="Selected slip" className="h-full w-[26rem] shrink-0 rounded-xl bg-black/30 p-3">
+              <aside aria-label="Selected slip" className="h-full w-[26rem] shrink-0 rounded-xl bg-primary/75 p-3">
                 {selected ? (
                   <SlipDetail key={selected.id} parlay={selected} {...actions} />
                 ) : (
