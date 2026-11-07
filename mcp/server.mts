@@ -1,4 +1,4 @@
-// MCP server that lets Claude Code research NFL props and save parlays to the tracker.
+// MCP server that lets Claude Code research NFL and NBA props and save parlays to the tracker.
 // Registered in .mcp.json; it talks over stdio, so nothing here may write to stdout.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -8,7 +8,7 @@ import { z } from "zod";
 import { createParlay } from "../src/lib/db";
 import { getGameLog, getGameStats, getInjuries, getRoster, getScoreboard, searchPlayers, type Game } from "../src/lib/espn";
 import { MODELS, type Model } from "../src/lib/labels";
-import { PERIOD_KEYS, STAT_KEYS, STATS } from "../src/lib/stats";
+import { PERIOD_KEYS, SPORTS, STAT_KEYS, STATS, statsFor, type Sport } from "../src/lib/stats";
 
 process.loadEnvFile(path.join(import.meta.dirname, "..", ".env.local"));
 
@@ -35,27 +35,35 @@ async function respond(run: () => Promise<unknown>): Promise<ToolResult> {
   }
 }
 
-async function findGame(eventId: string): Promise<Game> {
-  const { games } = await getScoreboard();
+async function findGame(eventId: string, sport: Sport): Promise<Game> {
+  const { games } = await getScoreboard(sport);
   const onSlate = games.find((g) => g.id === eventId);
   if (onSlate) return onSlate;
-  return (await getGameStats(eventId)).game;
+  return (await getGameStats(eventId, sport)).game;
 }
+
+const sportInput = z.enum(SPORTS).describe("nfl or nba");
 
 server.registerTool(
   "get_schedule",
   {
     description:
-      "List NFL games for a week with their event ids, kickoff times and status. Defaults to the current week. Call this first to get the event_id every leg needs.",
+      "List games with their event ids, start times and status: an NFL week (defaults to the current week) or an NBA day (defaults to today). Call this first to get the event_id every leg needs.",
     inputSchema: {
-      week: z.number().int().min(1).max(18).optional().describe("Regular-season week. Omit for the current week."),
+      sport: sportInput,
+      week: z.number().int().min(1).max(18).optional().describe("NFL only: regular-season week. Omit for the current week."),
+      date: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
+        .optional()
+        .describe("NBA only: the day as YYYY-MM-DD, in US Eastern time. Omit for today."),
     },
   },
-  ({ week }) =>
+  ({ sport, week, date }) =>
     respond(async () => {
-      const board = await getScoreboard(week);
+      const board = await getScoreboard(sport, sport === "nfl" ? { week } : { date });
       return {
-        week: board.week,
+        ...(sport === "nfl" ? { week: board.week } : { date: board.date }),
         games: board.games.map((g) => ({
           event_id: g.id,
           matchup: g.label,
@@ -71,28 +79,29 @@ server.registerTool(
   "search_players",
   {
     description: "Find a player by name. Returns athlete ids, position and current team.",
-    inputSchema: { query: z.string().describe("Full or partial player name") },
+    inputSchema: { sport: sportInput, query: z.string().describe("Full or partial player name") },
   },
-  ({ query }) => respond(async () => ({ players: await searchPlayers(query) })),
+  ({ sport, query }) => respond(async () => ({ players: await searchPlayers(query, sport) })),
 );
 
 server.registerTool(
   "get_team_roster",
   {
     description:
-      "List a team's quarterbacks, running backs, receivers, tight ends and kicker with athlete ids and injury designations. Use it to see who is actually available this week.",
-    inputSchema: { team: z.string().describe("Team abbreviation such as KC, or a team name") },
+      "List a team's players with athlete ids and injury designations: for the NFL its quarterbacks, running backs, receivers, tight ends and kicker; for the NBA the whole roster. Use it to see who is actually available.",
+    inputSchema: { sport: sportInput, team: z.string().describe("Team abbreviation such as KC or DEN, or a team name") },
   },
-  ({ team }) => respond(() => getRoster(team)),
+  ({ sport, team }) => respond(() => getRoster(team, sport)),
 );
 
 server.registerTool(
   "get_injuries",
   {
-    description: "Current injury report for a team's skill-position players, with status and the latest note.",
-    inputSchema: { team: z.string().describe("Team abbreviation such as KC, or a team name") },
+    description:
+      "Current injury report for a team (NFL skill positions, or every NBA player), with status and the latest note.",
+    inputSchema: { sport: sportInput, team: z.string().describe("Team abbreviation such as KC or DEN, or a team name") },
   },
-  ({ team }) => respond(() => getInjuries(team)),
+  ({ sport, team }) => respond(() => getInjuries(team, sport)),
 );
 
 server.registerTool(
@@ -101,22 +110,27 @@ server.registerTool(
     description:
       "A player's game-by-game stat lines, most recent first. Defaults to this season; pass a season year for earlier ones when this season's sample is thin.",
     inputSchema: {
+      sport: sportInput,
       athlete_id: z.string(),
-      last_n: z.number().int().min(1).max(17).optional().describe("How many games to return. Defaults to 6."),
-      season: z.number().int().optional().describe("Season year, e.g. 2025. Omit for the current season."),
+      last_n: z.number().int().min(1).max(25).optional().describe("How many games to return. Defaults to 6."),
+      season: z
+        .number()
+        .int()
+        .optional()
+        .describe("Season year, e.g. 2025. Omit for the current season. ESPN names an NBA season by the year it ends: 2026-27 is 2027."),
     },
   },
-  ({ athlete_id, last_n, season }) => respond(() => getGameLog(athlete_id, { lastN: last_n, season })),
+  ({ sport, athlete_id, last_n, season }) => respond(() => getGameLog(athlete_id, sport, { lastN: last_n, season })),
 );
 
-const markets = Object.entries(STATS)
-  .map(([key, def]) => `${key} (${def.label})`)
-  .join(", ");
+const markets = SPORTS.map(
+  (sport) => `${sport.toUpperCase()}: ${statsFor(sport).map((key) => `${key} (${STATS[key].label})`).join(", ")}`,
+).join(". ");
 
 server.registerTool(
   "save_parlay",
   {
-    description: `Save an approved parlay to the live tracker. Only call this after the user has confirmed the final slip, including every line. Trackable markets: ${markets}.`,
+    description: `Save an approved parlay to the live tracker. Only call this after the user has confirmed the final slip, including every line. A slip can mix NFL and NBA legs. Trackable markets by sport, ${markets}.`,
     inputSchema: {
       name: z.string().describe("Short name for the slip, e.g. 'SNF Ravens stack'"),
       notes: z.string().optional().describe("One or two sentences on the idea behind the parlay; shown on the board"),
@@ -156,9 +170,10 @@ server.registerTool(
       legs: z
         .array(
           z.object({
+            sport: sportInput,
             athlete_id: z.string().describe("ESPN athlete id exactly as returned by search_players or get_team_roster"),
             player_name: z.string(),
-            team: z.string().describe("The player's team abbreviation, e.g. KC"),
+            team: z.string().describe("The player's team abbreviation, e.g. KC or DEN"),
             event_id: z.string().describe("ESPN event id exactly as returned by get_schedule"),
             stat: z.enum(STAT_KEYS),
             direction: z.enum(["over", "under"]),
@@ -167,7 +182,7 @@ server.registerTool(
               .enum(PERIOD_KEYS)
               .optional()
               .describe(
-                "The part of the game the leg covers. Defaults to game. q1 to q4 count that quarter only. each_quarter means the line must be beaten in every one of the four quarters separately, e.g. '10+ rushing yards in each quarter' is rushing_yards over 9.5 with each_quarter. Overtime counts towards none of the quarters.",
+                "The part of the game the leg covers. Defaults to game, which is the only option for NBA legs. NFL only: q1 to q4 count that quarter only. each_quarter means the line must be beaten in every one of the four quarters separately, e.g. '10+ rushing yards in each quarter' is rushing_yards over 9.5 with each_quarter. Overtime counts towards none of the quarters.",
               ),
           }),
         )
@@ -183,7 +198,16 @@ server.registerTool(
       }
       const resolved = await Promise.all(
         legs.map(async (leg) => {
-          const game = await findGame(leg.event_id).catch(() => null);
+          if (STATS[leg.stat].sport !== leg.sport) {
+            problems.push(`${leg.player_name}: ${leg.stat} is not tracked for the ${leg.sport.toUpperCase()}.`);
+            return null;
+          }
+          // Quarter lines are rebuilt from NFL play-by-play only, so an NBA leg couldn't be graded.
+          if (leg.sport === "nba" && (leg.period ?? "game") !== "game") {
+            problems.push(`${leg.player_name}: NBA legs can only cover the full game.`);
+            return null;
+          }
+          const game = await findGame(leg.event_id, leg.sport).catch(() => null);
           if (!game) {
             problems.push(`${leg.player_name}: no game found for event_id ${leg.event_id}.`);
             return null;
@@ -193,13 +217,14 @@ server.registerTool(
             problems.push(`${leg.player_name}: ${team} is not playing in ${game.label}.`);
             return null;
           }
-          const roster = await getRoster(team);
+          const roster = await getRoster(team, leg.sport);
           const player = roster.players.find((p: { athleteId: string }) => p.athleteId === leg.athlete_id);
           if (!player) {
             problems.push(`${leg.player_name}: athlete_id ${leg.athlete_id} is not on the ${team} roster. Look them up with search_players.`);
             return null;
           }
           return {
+            sport: leg.sport,
             athlete_id: leg.athlete_id,
             player_name: player.name as string,
             team_abbr: team,

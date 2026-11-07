@@ -6,7 +6,7 @@ import { getGameStats, getQuarterStats, getScoreboard, headshotUrl, type Game, t
 import { gradeLeg, gradeParlay, gradeQuarters, type Direction, type GameState, type LegStatus, type ParlayStatus } from "./grade";
 import type { SlipLabels } from "./labels";
 import { impliedPayout } from "./odds";
-import { EMPTY_LINE, PERIODS, STATS, addLines, isPeriodKey, isStatKey, type PeriodKey } from "./stats";
+import { EMPTY_LINE, PERIODS, STATS, addLines, isPeriodKey, isStatKey, type PeriodKey, type Sport } from "./stats";
 
 export type BoardLeg = {
   id: string;
@@ -65,9 +65,9 @@ export type Board = {
   fetchedAt: string;
 };
 
-/** Logos are served from public/team-logos, downloaded by `pnpm logos`. */
-function teamLogoPath(abbr: string): string {
-  return `/team-logos/${abbr.toLowerCase()}.png`;
+/** Logos are served from public/team-logos/<sport>, downloaded by `pnpm logos`. */
+function teamLogoPath(abbr: string, sport: Sport): string {
+  return `/team-logos/${sport}/${abbr.toLowerCase()}.png`;
 }
 
 function score(game: Game): string | null {
@@ -79,26 +79,32 @@ export async function getBoard(): Promise<Board> {
   const parlays = await listParlays();
   const problems: string[] = [];
 
-  const openEvents = new Set(parlays.flatMap((p) => p.legs.filter((l) => !l.result).map((l) => l.event_id)));
+  // Each open event and the league it's in.
+  const openEvents = new Map(
+    parlays.flatMap((p) => p.legs.filter((l) => !l.result).map((l) => [l.event_id, l.sport] as const)),
+  );
 
+  // Today's slate in each league with an open leg: this NFL week, or today's NBA games.
   const slate = new Map<string, Game>();
-  if (openEvents.size > 0) {
-    try {
-      for (const game of (await getScoreboard()).games) slate.set(game.id, game);
-    } catch (error) {
-      problems.push(`Scoreboard unavailable: ${(error as Error).message}`);
-    }
-  }
+  await Promise.all(
+    [...new Set(openEvents.values())].map(async (sport) => {
+      try {
+        for (const game of (await getScoreboard(sport)).games) slate.set(game.id, game);
+      } catch (error) {
+        problems.push(`${sport.toUpperCase()} scoreboard unavailable: ${(error as Error).message}`);
+      }
+    }),
+  );
 
   // Games that haven't kicked off have no box score worth fetching. Anything started,
   // finished, or missing from this week's slate needs the full summary.
   const stats = new Map<string, GameStats>();
   await Promise.all(
     [...openEvents]
-      .filter((id) => slate.get(id)?.state !== "pre")
-      .map(async (id) => {
+      .filter(([id]) => slate.get(id)?.state !== "pre")
+      .map(async ([id, sport]) => {
         try {
-          stats.set(id, isDemoEvent(id) ? demoGameStats(id, new Date()) : await getGameStats(id));
+          stats.set(id, isDemoEvent(id) ? demoGameStats(id, new Date()) : await getGameStats(id, sport));
         } catch (error) {
           problems.push(`Stats unavailable for event ${id}: ${(error as Error).message}`);
         }
@@ -106,9 +112,11 @@ export async function getBoard(): Promise<Board> {
   );
 
   // Quarter-by-quarter numbers come from the play-by-play, a second request, so only fetch
-  // them for games with a leg that needs them.
+  // them for games with a leg that needs them. Only NFL play-by-play is parsed.
   const quarterEvents = new Set(
-    parlays.flatMap((p) => p.legs.filter((l) => !l.result && l.period !== "game").map((l) => l.event_id)),
+    parlays.flatMap((p) =>
+      p.legs.filter((l) => !l.result && l.period !== "game" && l.sport === "nfl").map((l) => l.event_id),
+    ),
   );
   const quarterStats = new Map<string, QuarterStats>();
   await Promise.all(
@@ -133,9 +141,9 @@ export async function getBoard(): Promise<Board> {
       const base = {
         id: leg.id,
         playerName: leg.player_name,
-        headshot: headshotUrl(leg.athlete_id),
+        headshot: headshotUrl(leg.athlete_id, leg.sport),
         team: leg.team_abbr,
-        teamLogo: leg.team_abbr && !isDemoEvent(leg.event_id) ? teamLogoPath(leg.team_abbr) : null,
+        teamLogo: leg.team_abbr && !isDemoEvent(leg.event_id) ? teamLogoPath(leg.team_abbr, leg.sport) : null,
         position: leg.player_position,
         statShort: def?.short ?? leg.stat,
         statLabel: def?.label ?? leg.stat,

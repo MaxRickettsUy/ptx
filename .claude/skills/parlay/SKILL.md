@@ -1,19 +1,19 @@
 ---
 name: parlay
-description: Build an NFL player-prop parlay with the user and save it to the ptx tracker. Use when the user wants to build, draft or save a parlay, or asks for prop legs for an NFL game.
+description: Build an NFL or NBA player-prop parlay with the user and save it to the ptx tracker. Use when the user wants to build, draft or save a parlay, or asks for prop legs for an NFL or NBA game.
 ---
 
 # Building a parlay
 
-You are helping one person build NFL player-prop parlays and save them to their tracker, where each leg is followed live against the box score during the game. The `parlay` MCP server provides the tools: `get_schedule`, `search_players`, `get_team_roster`, `get_injuries`, `get_player_game_log` and `save_parlay`.
+You are helping one person build NFL and NBA player-prop parlays and save them to their tracker, where each leg is followed live against the box score during the game. The `parlay` MCP server provides the tools: `get_schedule`, `search_players`, `get_team_roster`, `get_injuries`, `get_player_game_log` and `save_parlay`. Every tool takes a `sport`, `nfl` or `nba`, and so does every leg you save. A slip can mix the two.
 
 If those tools aren't available, the MCP server isn't connected. Tell the user to approve the `parlay` server from `/mcp` (it is defined in `.mcp.json`) rather than working around it with web requests, because only `save_parlay` can put a slip on the board.
 
 ## How a session goes
 
-The user describes what they want: which game or slate, how many legs, and what they're going for (a safe same-game parlay, a longshot, a stack around one quarterback, and so on). If one of those is missing and you can't reasonably infer it, ask. Then research with the tools, propose legs, refine them with the user, and save the parlay once they approve it.
+The user describes what they want: which sport, game or slate, how many legs, and what they're going for (a safe same-game parlay, a longshot, a stack around one quarterback, and so on). If one of those is missing and you can't reasonably infer it, ask. Then research with the tools, propose legs, refine them with the user, and save the parlay once they approve it.
 
-Your knowledge of rosters, depth charts, injuries and form is out of date, and NFL situations change weekly. Before proposing a player, check this season's reality with the tools: who is on the roster and healthy, and what their recent game logs look like. Don't recommend a leg from memory alone.
+Your knowledge of rosters, depth charts, injuries and form is out of date: NFL situations change weekly, and NBA ones nightly (rest days, minutes limits, late scratches). Before proposing a player, check this season's reality with the tools: who is on the roster and healthy, and what their recent game logs look like. Don't recommend a leg from memory alone.
 
 ## Lines come from the user
 
@@ -21,11 +21,17 @@ There is no odds feed, and a line you guess may not exist at the user's sportsbo
 
 A line written as "60+" means 60 or more, so record it as over 59.5. An anytime touchdown is `touchdowns` over 0.5. Keep half-point lines as given.
 
+## Schedules
+
+`get_schedule` returns an NFL week (pass `week`, or omit it for the current one) or an NBA day (pass `date` as YYYY-MM-DD in US Eastern time, or omit it for today). NBA games late on the West Coast start after midnight UTC but still belong to that Eastern date.
+
 ## Markets
 
-Only the markets listed in the `save_parlay` tool can be tracked, so only propose legs in those. `touchdowns` counts rushing and receiving scores, which is how anytime-TD props are settled for skill players; it excludes passing touchdowns thrown.
+Only the markets listed in the `save_parlay` tool can be tracked, and each belongs to one sport, so only propose legs in those. `touchdowns` counts rushing and receiving scores, which is how anytime-TD props are settled for skill players; it excludes passing touchdowns thrown.
 
 A leg covers the full game unless you set its `period`. Use `q1` to `q4` for a single-quarter prop, and `each_quarter` when the line has to be beaten in every one of the four quarters separately: "10+ rushing yards in each quarter" is `rushing_yards` over 9.5 with `each_quarter`. A bet on two players each doing that is two legs. Overtime counts towards no quarter. There are no half or per-drive periods, so say so rather than approximating one.
+
+NBA legs cover the full game only; the tracker can't follow NBA quarters or halves yet, so say so if the user wants a first-quarter or first-half prop. The combos are `pts_reb_ast` (PRA), `pts_reb`, `pts_ast`, `reb_ast` and `steals_blocks`; `threes_made` is made three-pointers. Overtime counts, as books settle it. An NBA player who sits shows 0, which loses an over, so check the injury report close to tip-off.
 
 ## Saving
 

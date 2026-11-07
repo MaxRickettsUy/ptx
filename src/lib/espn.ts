@@ -3,9 +3,15 @@
 // stats provider can replace it without touching the rest of the app.
 
 import type { GameState } from "./grade";
-import { EMPTY_LINE, type PlayerLine } from "./stats";
+import { EMPTY_LINE, type PlayerLine, type Sport } from "./stats";
 
-const SITE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl";
+// ESPN files each league under its sport: football/nfl, basketball/nba.
+const LEAGUES: Record<Sport, { sport: string; league: string }> = {
+  nfl: { sport: "football", league: "nfl" },
+  nba: { sport: "basketball", league: "nba" },
+};
+
+const site = (sport: Sport) => `https://site.api.espn.com/apis/site/v2/sports/${LEAGUES[sport].sport}/${LEAGUES[sport].league}`;
 const WEB = "https://site.web.api.espn.com/apis/common/v3";
 const CORE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl";
 
@@ -98,34 +104,44 @@ function toGame(competition: any, week: number | null): Game {
  * A team's logo on ESPN's image CDN, in the version drawn for dark backgrounds. The app serves
  * copies from public/team-logos instead; `pnpm logos` downloads them from here.
  */
-export function espnTeamLogoUrl(abbr: string, size = 128): string {
+export function espnTeamLogoUrl(abbr: string, sport: Sport, size = 128): string {
   const team = encodeURIComponent(abbr.toLowerCase());
-  return `https://a.espncdn.com/combiner/i?img=/i/teamlogos/nfl/500-dark/${team}.png&w=${size}&h=${size}`;
+  return `https://a.espncdn.com/combiner/i?img=/i/teamlogos/${sport}/500-dark/${team}.png&w=${size}&h=${size}`;
 }
 
 /** Square headshot from ESPN's image CDN, or null for ids that aren't real ESPN athletes. */
-export function headshotUrl(athleteId: string, size = 96): string | null {
+export function headshotUrl(athleteId: string, sport: Sport, size = 96): string | null {
   if (!/^\d+$/.test(athleteId)) return null;
-  return `https://a.espncdn.com/combiner/i?img=/i/headshots/nfl/players/full/${athleteId}.png&w=${size}&h=${size}&scale=crop`;
+  return `https://a.espncdn.com/combiner/i?img=/i/headshots/${sport}/players/full/${athleteId}.png&w=${size}&h=${size}&scale=crop`;
 }
 
-function scoreboardData(week?: number, ttl = 15 * SECOND): Promise<any> {
-  const query = week ? `?seasontype=2&week=${week}` : "";
-  return cached(`scoreboard:${week ?? "current"}:${ttl}`, ttl, () => getJson(`${SITE}/scoreboard${query}`));
+// The NFL slate is a week of the regular season; the NBA's is one day, as YYYYMMDD.
+function scoreboardData(sport: Sport, when: { week?: number; date?: string } = {}, ttl = 15 * SECOND): Promise<any> {
+  const query = when.week ? `?seasontype=2&week=${when.week}` : when.date ? `?dates=${when.date}` : "";
+  const key = `scoreboard:${sport}:${when.week ?? when.date ?? "current"}:${ttl}`;
+  return cached(key, ttl, () => getJson(`${site(sport)}/scoreboard${query}`));
 }
 
-/** Forgets cached scoreboards: one week's (and the current week's), or every week's when none is given. */
+/** Forgets cached NFL scoreboards: one week's (and the current week's), or every week's when none is given. */
 export function forgetScoreboards(week?: number) {
-  if (week === undefined) return forget("scoreboard:");
-  forget(`scoreboard:${week}:`);
-  forget("scoreboard:current:");
+  if (week === undefined) return forget("scoreboard:nfl:");
+  forget(`scoreboard:nfl:${week}:`);
+  forget("scoreboard:nfl:current:");
 }
 
-export async function getScoreboard(week?: number): Promise<{ week: number; games: Game[] }> {
-  const data = await scoreboardData(week);
-  const weekNumber: number = data.week?.number ?? week ?? 0;
+/**
+ * One slate of games: an NFL week (defaulting to the current one), or an NBA day as YYYY-MM-DD
+ * (defaulting to ESPN's today). `week` is null for the NBA.
+ */
+export async function getScoreboard(
+  sport: Sport,
+  when: { week?: number; date?: string } = {},
+): Promise<{ week: number | null; date: string | null; games: Game[] }> {
+  const date = when.date?.replaceAll("-", "");
+  const data = await scoreboardData(sport, { week: when.week, date });
+  const weekNumber: number | null = sport === "nfl" ? (data.week?.number ?? when.week ?? 0) : null;
   const games: Game[] = (data.events ?? []).map((event: any) => toGame(event.competitions[0], weekNumber));
-  return { week: weekNumber, games };
+  return { week: weekNumber, date: data.day?.date ?? when.date ?? null, games };
 }
 
 export type ScoreTeam = TeamSide & { name: string; record: string | null; quarters: number[] };
@@ -148,7 +164,7 @@ export type WeekScores = {
  * A week that's over can pass a longer `ttl`, since its scores won't change.
  */
 export async function getWeekScores(week?: number, ttl?: number): Promise<WeekScores> {
-  const [data, current] = await Promise.all([scoreboardData(week, ttl), week ? scoreboardData() : null]);
+  const [data, current] = await Promise.all([scoreboardData("nfl", { week }, ttl), week ? scoreboardData("nfl") : null]);
   const now = current ?? data;
   const weekNumber: number = data.week?.number ?? week ?? 0;
   const regular = (data.leagues?.[0]?.calendar ?? []).find((c: any) => String(c.value) === "2");
@@ -177,8 +193,10 @@ export async function getWeekScores(week?: number, ttl?: number): Promise<WeekSc
   };
 }
 
-// Maps the boxscore's per-category `keys` onto our flat stat line.
-const BOX_FIELDS: Record<string, Record<string, (line: PlayerLine, raw: string) => void>> = {
+type BoxFields = Record<string, (line: PlayerLine, raw: string) => void>;
+
+// Maps the NFL boxscore's per-category `keys` onto our flat stat line.
+const NFL_BOX_FIELDS: Record<string, BoxFields> = {
   passing: {
     "completions/passingAttempts": (line, raw) => {
       const [cmp, att] = raw.split("/");
@@ -205,15 +223,29 @@ const BOX_FIELDS: Record<string, Record<string, (line: PlayerLine, raw: string) 
   },
 };
 
-export async function getGameStats(eventId: string): Promise<GameStats> {
-  return cached(`summary:${eventId}`, 15 * SECOND, async () => {
-    const data = await getJson(`${SITE}/summary?event=${encodeURIComponent(eventId)}`);
+// The NBA boxscore has a single, unnamed category holding every column.
+const NBA_BOX_FIELDS: BoxFields = {
+  points: (line, raw) => void (line.pts = num(raw)),
+  rebounds: (line, raw) => void (line.reb = num(raw)),
+  assists: (line, raw) => void (line.ast = num(raw)),
+  steals: (line, raw) => void (line.stl = num(raw)),
+  blocks: (line, raw) => void (line.blk = num(raw)),
+  turnovers: (line, raw) => void (line.tov = num(raw)),
+  "threePointFieldGoalsMade-threePointFieldGoalsAttempted": (line, raw) => void (line.threes = num(raw.split("-")[0])),
+};
+
+const boxFields = (sport: Sport, category: string | null): BoxFields | undefined =>
+  sport === "nba" ? NBA_BOX_FIELDS : NFL_BOX_FIELDS[category ?? ""];
+
+export async function getGameStats(eventId: string, sport: Sport): Promise<GameStats> {
+  return cached(`summary:${sport}:${eventId}`, 15 * SECOND, async () => {
+    const data = await getJson(`${site(sport)}/summary?event=${encodeURIComponent(eventId)}`);
     const game = toGame(data.header.competitions[0], data.header.week ?? null);
     const players: GameStats["players"] = {};
 
     for (const team of data.boxscore?.players ?? []) {
       for (const category of team.statistics ?? []) {
-        const fields = BOX_FIELDS[category.name];
+        const fields = boxFields(sport, category.name);
         if (!fields) continue;
         const keys: string[] = category.keys ?? [];
         for (const row of category.athletes ?? []) {
@@ -351,9 +383,9 @@ export async function getQuarterStats(eventId: string, finished: boolean): Promi
   });
 }
 
-export async function getTeams(): Promise<{ id: string; abbr: string; name: string }[]> {
-  return cached("teams", 24 * 60 * MINUTE, async () => {
-    const data = await getJson(`${SITE}/teams`);
+export async function getTeams(sport: Sport): Promise<{ id: string; abbr: string; name: string }[]> {
+  return cached(`teams:${sport}`, 24 * 60 * MINUTE, async () => {
+    const data = await getJson(`${site(sport)}/teams`);
     return data.sports[0].leagues[0].teams.map((t: any) => ({
       id: String(t.team.id),
       abbr: t.team.abbreviation,
@@ -362,8 +394,8 @@ export async function getTeams(): Promise<{ id: string; abbr: string; name: stri
   });
 }
 
-async function resolveTeam(team: string) {
-  const teams = await getTeams();
+async function resolveTeam(team: string, sport: Sport) {
+  const teams = await getTeams(sport);
   const needle = team.trim().toLowerCase();
   const found =
     teams.find((t) => t.abbr.toLowerCase() === needle) ??
@@ -374,9 +406,10 @@ async function resolveTeam(team: string) {
   return found;
 }
 
-export async function searchPlayers(query: string): Promise<PlayerSummary[]> {
-  const url = `${WEB}/search?query=${encodeURIComponent(query)}&type=player&sport=football&league=nfl&limit=8`;
-  const data = await cached(`search:${query.toLowerCase()}`, 10 * MINUTE, () => getJson(url));
+export async function searchPlayers(query: string, sport: Sport): Promise<PlayerSummary[]> {
+  const { sport: espnSport, league } = LEAGUES[sport];
+  const url = `${WEB}/search?query=${encodeURIComponent(query)}&type=player&sport=${espnSport}&league=${league}&limit=8`;
+  const data = await cached(`search:${sport}:${query.toLowerCase()}`, 10 * MINUTE, () => getJson(url));
   return (data.items ?? [])
     .filter((item: any) => item.isActive !== false)
     .map((item: any) => ({
@@ -388,20 +421,26 @@ export async function searchPlayers(query: string): Promise<PlayerSummary[]> {
     }));
 }
 
-const PROP_POSITIONS = new Set(["QB", "RB", "FB", "WR", "TE", "PK", "K"]);
+// NFL props only cover skill positions and kickers; every NBA player can carry one.
+const NFL_PROP_POSITIONS = new Set(["QB", "RB", "FB", "WR", "TE", "PK", "K"]);
+const hasProps = (sport: Sport, position: string | undefined) => sport === "nba" || NFL_PROP_POSITIONS.has(position ?? "");
 
-export async function getRoster(team: string) {
-  const resolved = await resolveTeam(team);
-  const data = await cached(`roster:${resolved.id}`, 10 * MINUTE, () => getJson(`${SITE}/teams/${resolved.id}/roster`));
-  const players = (data.athletes ?? [])
+export async function getRoster(team: string, sport: Sport) {
+  const resolved = await resolveTeam(team, sport);
+  const data = await cached(`roster:${sport}:${resolved.id}`, 10 * MINUTE, () =>
+    getJson(`${site(sport)}/teams/${resolved.id}/roster`),
+  );
+  // NFL rosters come grouped by unit (offense, injured reserve, practice squad); NBA rosters are one flat list.
+  const groups: any[] = sport === "nfl" ? (data.athletes ?? []) : [{ position: "active", items: data.athletes ?? [] }];
+  const players = groups
     .filter((group: any) => group.position !== "practiceSquad")
     .flatMap((group: any) =>
       (group.items ?? [])
-        .filter((p: any) => PROP_POSITIONS.has(p.position?.abbreviation))
+        .filter((p: any) => hasProps(sport, p.position?.abbreviation))
         .map((p: any) => ({
           athleteId: String(p.id),
           name: p.displayName,
-          position: p.position.abbreviation,
+          position: p.position?.abbreviation ?? null,
           jersey: p.jersey ?? null,
           rosterStatus: group.position === "injuredReserveOrOut" ? "IR / out" : "active",
           injury: p.injuries?.[0]?.status ?? null,
@@ -410,13 +449,13 @@ export async function getRoster(team: string) {
   return { team: resolved.abbr, players };
 }
 
-export async function getInjuries(team: string) {
-  const resolved = await resolveTeam(team);
+export async function getInjuries(team: string, sport: Sport) {
+  const resolved = await resolveTeam(team, sport);
   // One ~9MB payload covers the whole league, so keep it around for a while.
-  const data = await cached("injuries", 10 * MINUTE, () => getJson(`${SITE}/injuries`));
+  const data = await cached(`injuries:${sport}`, 10 * MINUTE, () => getJson(`${site(sport)}/injuries`));
   const entry = (data.injuries ?? []).find((t: any) => String(t.id) === resolved.id);
   const injuries = (entry?.injuries ?? [])
-    .filter((i: any) => PROP_POSITIONS.has(i.athlete?.position?.abbreviation))
+    .filter((i: any) => hasProps(sport, i.athlete?.position?.abbreviation))
     .map((i: any) => ({
       name: i.athlete.displayName,
       position: i.athlete.position.abbreviation,
@@ -428,11 +467,12 @@ export async function getInjuries(team: string) {
   return { team: resolved.abbr, injuries };
 }
 
-export async function getGameLog(athleteId: string, options: { lastN?: number; season?: number } = {}) {
+export async function getGameLog(athleteId: string, sport: Sport, options: { lastN?: number; season?: number } = {}) {
   const { lastN = 6, season } = options;
   const query = season ? `?season=${season}` : "";
-  const url = `${WEB}/sports/football/nfl/athletes/${encodeURIComponent(athleteId)}/gamelog${query}`;
-  const data = await cached(`gamelog:${athleteId}:${season ?? "current"}`, 5 * MINUTE, () => getJson(url));
+  const { sport: espnSport, league } = LEAGUES[sport];
+  const url = `${WEB}/sports/${espnSport}/${league}/athletes/${encodeURIComponent(athleteId)}/gamelog${query}`;
+  const data = await cached(`gamelog:${sport}:${athleteId}:${season ?? "current"}`, 5 * MINUTE, () => getJson(url));
   const names: string[] = data.names ?? [];
 
   const games = (data.seasonTypes ?? [])

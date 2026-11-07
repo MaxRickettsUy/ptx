@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ptx tracks NFL player-prop parlays. Slips are built conversationally in Claude Code via the `/parlay` skill (`.claude/skills/parlay/`) and the `parlay` MCP server, saved to Supabase, and shown on a Next.js board that grades every leg live against ESPN's box score. Two more sections, Scores (`/scores`) and Stats (`/stats`), show weekly results and season-to-date team totals.
+ptx tracks NFL and NBA player-prop parlays. Slips are built conversationally in Claude Code via the `/parlay` skill (`.claude/skills/parlay/`) and the `parlay` MCP server, saved to Supabase, and shown on a Next.js board that grades every leg live against ESPN's box score. Two more sections, Scores (`/scores`) and Stats (`/stats`), show weekly NFL results and season-to-date team totals; they don't cover the NBA.
 
 ## Commands
 
@@ -27,12 +27,13 @@ Env lives in `.env.local` (from `.env.example`): `SUPABASE_URL` and `SUPABASE_SE
 
 **Data flows one way: ESPN → `src/lib` → API routes → client components that poll.** Every page is a client component (`src/components/{board,scores,stats}.tsx`) that fetches its `/api/*` route and polls (15s while a game is live, 60s otherwise; stats every 5 min). `next.config.ts` has `cacheComponents: true`, so pages that read `useSearchParams` are wrapped in `<Suspense>`.
 
-- `src/lib/espn.ts` is the **only** file that knows ESPN's undocumented response shapes; swapping stats providers means replacing it. It has an in-memory TTL cache (`cached()`), so data is per server process. Scoreboards are cached by week and TTL; `forgetScoreboards()` clears them and backs the `POST /api/scores` and `POST /api/stats` refresh endpoints.
-- Quarter-by-quarter player stats aren't in the box score. `quarterStatsFromPlays` rebuilds them from play-by-play text, and `board.ts` refuses to settle a quarter leg whose quarters don't sum to the official box-score total.
-- `src/lib/stats.ts` is the registry of trackable markets (`STATS`) and periods (`PERIODS`). Adding a market there makes it available to both the MCP `save_parlay` tool and the board. `monotonic: false` (yardage) means the leg can only settle at the final whistle.
+- `src/lib/espn.ts` is the **only** file that knows ESPN's undocumented response shapes; swapping stats providers means replacing it. Every call takes a `Sport` (`nfl` | `nba`); each leg stores its sport in `legs.sport`, so one slip can mix leagues. The NFL slate is a week, the NBA's a day. It has an in-memory TTL cache (`cached()`), so data is per server process. Scoreboards are cached by week and TTL; `forgetScoreboards()` clears them and backs the `POST /api/scores` and `POST /api/stats` refresh endpoints.
+- Quarter-by-quarter player stats aren't in the box score. `quarterStatsFromPlays` rebuilds them from play-by-play text, and `board.ts` refuses to settle a quarter leg whose quarters don't sum to the official box-score total. That parser is NFL-only, so `save_parlay` limits NBA legs to `period: game`.
+- `src/lib/stats.ts` is the registry of sports (`SPORTS`), trackable markets (`STATS`, each tagged with its sport) and periods (`PERIODS`). Adding a market there makes it available to both the MCP `save_parlay` tool and the board. `monotonic: false` (yardage) means the leg can only settle at the final whistle.
 - `src/lib/grade.ts` holds the pure leg/parlay status rules.
 - `src/lib/board.ts` joins saved legs with live stats. **It also settles on read:** when a game is final, `getBoard()` writes leg and parlay results back to the database as a side effect of `GET /api/board`.
 - `src/lib/demo.ts`: any leg whose `event_id` starts with `demo-` is graded against a simulated, always-live game on a one-hour loop, for trying the board when no real game is on.
+- Team logos live in `public/team-logos/{nfl,nba}/` (the leagues share abbreviations) and are downloaded by `pnpm logos`.
 - `src/lib/season.ts` totals every regular-season week's final scores per team for the Stats page. Finished weeks are fetched with a 1-hour TTL.
 - `src/lib/db.ts` uses the Supabase **secret key** (bypasses RLS; tables have RLS on with no policies). It's shared by the Next server and the MCP server; never import it into a client component.
 

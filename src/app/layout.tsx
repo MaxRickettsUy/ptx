@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ptx",
-  description: "Track NFL player-prop parlays leg by leg against the live box score.",
+  description: "Track NFL and NBA player-prop parlays leg by leg against the live box score.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

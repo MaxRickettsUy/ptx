@@ -52,6 +52,7 @@ export type Database = {
           position_in_parlay: number
           quarter_values: number[] | null
           result: string | null
+          sport: string
           stat: string
           team_abbr: string | null
         }
@@ -72,6 +73,7 @@ export type Database = {
           position_in_parlay?: number
           quarter_values?: number[] | null
           result?: string | null
+          sport?: string
           stat: string
           team_abbr?: string | null
         }
@@ -92,6 +94,7 @@ export type Database = {
           position_in_parlay?: number
           quarter_values?: number[] | null
           result?: string | null
+          sport?: string
           stat?: string
           team_abbr?: string | null
         }

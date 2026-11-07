@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./database.types";
 import type { Direction } from "./grade";
 import { isModel, type SlipLabels } from "./labels";
+import type { Sport } from "./stats";
 
 function env(name: string): string {
   const value = process.env[name];
@@ -24,6 +25,7 @@ export type LegRow = {
   id: string;
   parlay_id: string;
   position_in_parlay: number;
+  sport: Sport;
   athlete_id: string;
   player_name: string;
   team_abbr: string | null;
