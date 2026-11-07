@@ -43,6 +43,8 @@ export type BoardParlay = {
   createdAt: string;
   /** True when the user wrote this slip off by hand rather than the box score deciding it. */
   markedLost: boolean;
+  /** True when the user says they really placed this bet. */
+  lockedIn: boolean;
   wager: number | null;
   odds: number | null;
   /** Payout multiple (1.9x), for books that price that way. A slip has odds or a multiplier, not both. */
@@ -252,6 +254,7 @@ export async function getBoard(): Promise<Board> {
       notes: parlay.notes,
       createdAt: parlay.created_at,
       markedLost,
+      lockedIn: parlay.locked_at !== null,
       wager,
       odds: parlay.odds,
       multiplier,

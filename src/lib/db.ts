@@ -48,6 +48,7 @@ export type ParlayRow = {
   result: "won" | "lost" | "push" | null;
   settled_at: string | null;
   marked_lost_at: string | null;
+  locked_at: string | null;
   wager: number | null;
   odds: number | null;
   multiplier: number | null;
@@ -113,7 +114,8 @@ export async function deleteParlay(id: string): Promise<void> {
 export async function setDetails(id: string, stake: Stake, labels?: SlipLabels): Promise<void> {
   const { error } = await db()
     .from("parlays")
-    .update({ ...stake, ...(labels && labelColumns(labels)) })
+    // A slip that turns out to be a mock wasn't really placed, so it can't stay locked in.
+    .update({ ...stake, ...(labels && labelColumns(labels)), ...(labels?.mock && { locked_at: null }) })
     .eq("id", id);
   if (error) throw new Error(error.message);
 }
@@ -123,6 +125,15 @@ export async function setMarkedLost(id: string, markedLost: boolean): Promise<vo
   const { error } = await db()
     .from("parlays")
     .update({ marked_lost_at: markedLost ? new Date().toISOString() : null })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+/** Marks a slip as really placed with a book, or clears that. A locked-in slip is never a mock. */
+export async function setLockedIn(id: string, lockedIn: boolean): Promise<void> {
+  const { error } = await db()
+    .from("parlays")
+    .update(lockedIn ? { locked_at: new Date().toISOString(), is_mock: false } : { locked_at: null })
     .eq("id", id);
   if (error) throw new Error(error.message);
 }

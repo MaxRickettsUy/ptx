@@ -111,6 +111,7 @@ export type Database = {
           created_at: string
           id: string
           is_mock: boolean
+          locked_at: string | null
           marked_lost_at: string | null
           model: string | null
           multiplier: number | null
@@ -127,6 +128,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_mock?: boolean
+          locked_at?: string | null
           marked_lost_at?: string | null
           model?: string | null
           multiplier?: number | null
@@ -143,6 +145,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_mock?: boolean
+          locked_at?: string | null
           marked_lost_at?: string | null
           model?: string | null
           multiplier?: number | null

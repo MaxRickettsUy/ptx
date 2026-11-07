@@ -1,4 +1,4 @@
-import { deleteParlay, setDetails, setMarkedLost } from "@/lib/db";
+import { deleteParlay, setDetails, setLockedIn, setMarkedLost } from "@/lib/db";
 import { isModel } from "@/lib/labels";
 import { isAmericanOdds, isMultiplier } from "@/lib/odds";
 
@@ -15,7 +15,7 @@ export async function DELETE(_req: Request, ctx: RouteContext<"/api/parlays/[id]
 const isAmount = (value: unknown): value is number | null =>
   value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0);
 
-// Accepts either { markedLost } or { wager, odds, multiplier, payout, labels? }; in the second
+// Accepts { markedLost }, { lockedIn }, or { wager, odds, multiplier, payout, labels? }; in the second
 // form every stake value is sent, with null clearing it. A slip is priced by odds or a
 // multiplier, not both. Labels are { human, model, mock }, where model is "claude", "chatgpt" or
 // null, and are left alone when omitted.
@@ -26,6 +26,11 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/parlays/[id]">
   try {
     if (typeof body.markedLost === "boolean") {
       await setMarkedLost(id, body.markedLost);
+      return new Response(null, { status: 204 });
+    }
+
+    if (typeof body.lockedIn === "boolean") {
+      await setLockedIn(id, body.lockedIn);
       return new Response(null, { status: 204 });
     }
 
@@ -62,7 +67,7 @@ export async function PATCH(req: Request, ctx: RouteContext<"/api/parlays/[id]">
       return new Response(null, { status: 204 });
     }
 
-    return Response.json({ error: "Expected { markedLost } or { wager, odds, multiplier, payout, labels? }." }, { status: 400 });
+    return Response.json({ error: "Expected { markedLost }, { lockedIn } or { wager, odds, multiplier, payout, labels? }." }, { status: 400 });
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 500 });
   }

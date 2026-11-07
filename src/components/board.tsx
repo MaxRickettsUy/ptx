@@ -1,6 +1,6 @@
 "use client";
 
-import { Circle, CircleCheck, CircleX, Copy } from "lucide-react";
+import { Circle, CircleCheck, CircleX, Copy, Lock } from "lucide-react";
 import Link from "next/link";
 import type { IconType } from "react-icons";
 import { BsOpenai } from "react-icons/bs";
@@ -100,6 +100,19 @@ export function Board() {
     refresh();
   }
 
+  async function lockIn(parlay: BoardParlay, lockedIn: boolean) {
+    const res = await fetch(`/api/parlays/${parlay.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lockedIn }),
+    });
+    if (!res.ok) {
+      setError("Couldn't update that slip.");
+      return;
+    }
+    refresh();
+  }
+
   async function setStake(parlay: BoardParlay, stake: Stake) {
     const res = await fetch(`/api/parlays/${parlay.id}`, {
       method: "PATCH",
@@ -142,7 +155,7 @@ export function Board() {
   const selected =
     slips.find((p) => p.id === selectedId) ??
     (hasDetailColumn ? (slips.find((p) => p.status === "live") ?? slips[0] ?? null) : null);
-  const actions: SlipActions = { onDelete: remove, onMarkLost: markLost, onSetStake: setStake };
+  const actions: SlipActions = { onDelete: remove, onMarkLost: markLost, onLockIn: lockIn, onSetStake: setStake };
 
   return (
     <SidebarProvider open={panelOpen} onOpenChange={setPanelOpen}>
@@ -281,6 +294,7 @@ type Stake = { wager: number | null; odds: number | null; multiplier: number | n
 type SlipActions = {
   onDelete: (parlay: BoardParlay) => void;
   onMarkLost: (parlay: BoardParlay, markedLost: boolean) => void;
+  onLockIn: (parlay: BoardParlay, lockedIn: boolean) => void;
   onSetStake: (parlay: BoardParlay, stake: Stake) => void;
 };
 
@@ -290,6 +304,8 @@ const SORT_KEYS = [
   { key: "legs", label: "Legs", value: (p: BoardParlay) => p.legs.length },
   { key: "payout", label: "Payout", value: (p: BoardParlay) => p.payout },
   { key: "wager", label: "Wager", value: (p: BoardParlay) => p.wager },
+  // High to low puts the bets you really placed first.
+  { key: "locked", label: "Locked in", value: (p: BoardParlay) => (p.lockedIn ? 1 : 0) },
 ] as const;
 
 type SortKey = (typeof SORT_KEYS)[number]["key"];
@@ -430,12 +446,15 @@ function SlipPreview({ parlay, selected, onSelect }: { parlay: BoardParlay; sele
       onClick={onSelect}
       className={cn(
         "grid w-full shrink-0 cursor-pointer grid-cols-[minmax(0,1fr)] gap-2.5 border bg-card p-4 text-left transition-colors hover:bg-accent",
-        selected ? "border-primary" : "border-transparent",
+        selected ? "border-primary" : parlay.lockedIn ? "border-hit" : "border-transparent",
       )}
     >
       <span className="flex items-center justify-between gap-3">
-        <span className="min-w-0 truncate type-caption font-semibold">{parlay.name}</span>
-        <LabelMarks labels={parlay.labels} className="shrink-0 type-fine" />
+        <span className="min-w-0 truncate type-fine font-semibold">{parlay.name}</span>
+        <span className="flex shrink-0 items-center gap-1">
+          {parlay.lockedIn && <LockedInMark />}
+          <LabelMarks labels={parlay.labels} className="type-fine" />
+        </span>
       </span>
       <span className="flex flex-wrap gap-1">
         {parlay.legs.map((leg) => (
@@ -493,19 +512,20 @@ function TeamLogos({ teams, className }: { teams: { abbr: string; logo: string }
 }
 
 // The full slip: header, wager band and footer stay put while the legs scroll between them.
-function SlipDetail({ parlay, inSheet = false, onDelete, onMarkLost, onSetStake }: { parlay: BoardParlay; inSheet?: boolean } & SlipActions) {
+function SlipDetail({ parlay, inSheet = false, onDelete, onMarkLost, onLockIn, onSetStake }: { parlay: BoardParlay; inSheet?: boolean } & SlipActions) {
   const hits = parlay.legs.filter((l) => l.status === "hit").length;
   const [noteOpen, setNoteOpen] = useState(false);
   const [stakeOpen, setStakeOpen] = useState(false);
 
   return (
-    <Card data-slot="slip-detail" className="@container/slip h-full gap-0 rounded-none border-0 pt-0">
+    <Card data-slot="slip-detail" size="sm" className="@container/slip h-full gap-0 rounded-none border-0 pt-0">
       <CardHeader className="shrink-0 grid-cols-[minmax(0,1fr)] rounded-none border-b pt-(--card-spacing)">
         {/* In the slide-over, the close button sits over the top-right corner. */}
         <CardTitle className={cn(inSheet && "pr-10")}>{parlay.name}</CardTitle>
         <div className="mt-1.5 flex min-w-0 flex-col items-start gap-2">
           <div className="flex items-center gap-2.5">
             <StatusBadge parlay={parlay} />
+            {parlay.lockedIn && <LockedInMark />}
             {/* Who built the slip and whether it was really placed; clicking opens the editor. */}
             {Object.values(parlay.labels).some(Boolean) && (
               <button
@@ -525,7 +545,7 @@ function SlipDetail({ parlay, inSheet = false, onDelete, onMarkLost, onSetStake 
               aria-haspopup="dialog"
               aria-label={`Read the note for ${parlay.name}`}
               onClick={() => setNoteOpen(true)}
-              className="w-full cursor-pointer truncate text-left type-caption text-muted-foreground transition-colors hover:text-foreground"
+              className="w-full cursor-pointer truncate text-left type-fine text-muted-foreground transition-colors hover:text-foreground"
             >
               {parlay.notes}
             </button>
@@ -547,7 +567,7 @@ function SlipDetail({ parlay, inSheet = false, onDelete, onMarkLost, onSetStake 
         />
       )}
 
-      <CardContent data-slot="slip-legs" className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-5">
+      <CardContent data-slot="slip-legs" className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-3">
         <ul className="divide-y">
           {parlay.legs.map((leg) => (
             <LegRow key={leg.id} leg={leg} />
@@ -566,7 +586,7 @@ function SlipDetail({ parlay, inSheet = false, onDelete, onMarkLost, onSetStake 
         </Dialog>
       )}
 
-      <SlipFooter parlay={parlay} hits={hits} onDelete={onDelete} onMarkLost={onMarkLost} />
+      <SlipFooter parlay={parlay} hits={hits} onDelete={onDelete} onMarkLost={onMarkLost} onLockIn={onLockIn} />
     </Card>
   );
 }
@@ -594,6 +614,11 @@ function labelMarks(labels: SlipLabels) {
   ].filter((mark) => mark !== false && mark !== undefined);
 }
 
+// A slip the user really placed with a book.
+function LockedInMark() {
+  return <Lock role="img" aria-label="Locked in" className="size-3.5 shrink-0 text-hit" />;
+}
+
 function LabelMarks({ labels, className }: { labels: SlipLabels; className?: string }) {
   const shown = labelMarks(labels);
   if (shown.length === 0) return null;
@@ -612,7 +637,7 @@ function LabelMarks({ labels, className }: { labels: SlipLabels; className?: str
 function StakeStrip({ parlay, onEdit }: { parlay: BoardParlay; onEdit: () => void }) {
   const { wager, payout } = parlay;
   const price = formatPrice(parlay);
-  const band = "shrink-0 cursor-pointer border-b px-(--card-spacing) py-3 text-left transition-colors hover:bg-muted/40";
+  const band = "shrink-0 cursor-pointer border-b px-(--card-spacing) py-2 text-left transition-colors hover:bg-muted/40";
 
   if (wager === null && price === null && payout === null) {
     return (
@@ -638,7 +663,7 @@ function StakeStrip({ parlay, onEdit }: { parlay: BoardParlay; onEdit: () => voi
       {cells.map((cell) => (
         <span key={cell.label} className="min-w-0">
           <span className="block type-fine text-muted-foreground">{cell.label}</span>
-          <span className={cn("block truncate font-semibold tabular-nums", cell.className)}>{cell.value}</span>
+          <span className={cn("block truncate type-caption font-semibold tabular-nums", cell.className)}>{cell.value}</span>
         </span>
       ))}
     </button>
@@ -760,10 +785,11 @@ function SlipFooter({
   hits,
   onDelete,
   onMarkLost,
-}: { parlay: BoardParlay; hits: number } & Pick<SlipActions, "onDelete" | "onMarkLost">) {
+  onLockIn,
+}: { parlay: BoardParlay; hits: number } & Pick<SlipActions, "onDelete" | "onMarkLost" | "onLockIn">) {
   const linkClass = "h-auto px-0 type-fine";
   return (
-    <CardFooter className="shrink-0 flex-col items-stretch gap-2 rounded-none type-fine text-muted-foreground">
+    <CardFooter className="shrink-0 flex-col items-stretch gap-1.5 rounded-none py-3 type-fine text-muted-foreground">
       <div className="flex items-center justify-between gap-4">
         {/* Everything here stays on one line: the date drops out when the card is narrow (a phone,
             or three lanes on a small laptop), and the tally truncates before the actions ever wrap. */}
@@ -775,7 +801,10 @@ function SlipFooter({
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-4 whitespace-nowrap">
-          {/* Writing a slip off is one click because Reopen undoes it; only deleting asks first. */}
+          {/* Locking in, writing off and their undos are one click each; only deleting asks first. */}
+          <Button variant="link" size="sm" className={linkClass} onClick={() => onLockIn(parlay, !parlay.lockedIn)}>
+            {parlay.lockedIn ? "Unlock" : "Lock in"}
+          </Button>
           {parlay.status === "live" && (
             <Button variant="link" size="sm" className={linkClass} onClick={() => onMarkLost(parlay, true)}>
               Mark lost
@@ -913,22 +942,22 @@ function LegRow({ leg }: { leg: BoardLeg }) {
   const headline = leg.quarters ? `${leg.quarters.filter((q) => q.status === "hit").length}/4` : leg.value;
 
   return (
-    <li className="py-5 first:pt-0 last:pb-0">
+    <li className="py-3 first:pt-0 last:pb-0">
       {/* One row for who and how many; the bet itself gets the full width underneath, since
           beside a photo on a narrow card it wrapped to three or four lines. */}
-      <div className="flex items-center gap-2.5">
-        <LegMark status={leg.status} />
+      <div className="flex items-center gap-2">
+        <LegMark status={leg.status} className="size-4" />
         {/* The fallback covers players with no photo on file, and the simulated game's made-up ones. */}
-        <Avatar className="bg-muted">
+        <Avatar size="sm" className="bg-muted">
           {leg.headshot && <AvatarImage src={leg.headshot} alt="" />}
-          <AvatarFallback className="type-fine font-semibold">{initials(leg.playerName)}</AvatarFallback>
+          <AvatarFallback className="font-semibold">{initials(leg.playerName)}</AvatarFallback>
         </Avatar>
-        <p className="min-w-0 flex-1 truncate font-semibold leading-[1.24]">{leg.playerName}</p>
-        <p className={cn("shrink-0 font-heading type-lead font-semibold tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
+        <p className="min-w-0 flex-1 truncate type-caption font-semibold">{leg.playerName}</p>
+        <p className={cn("shrink-0 font-heading type-tagline font-semibold tabular-nums", started ? "text-foreground" : "text-muted-foreground/50")}>
           {started ? headline : "–"}
         </p>
       </div>
-      <p className="mt-2 type-caption text-muted-foreground">
+      <p className="mt-1 type-fine text-muted-foreground">
         <span className="capitalize">{leg.direction}</span> {leg.line} {lowerFirst(leg.statLabel)}
         {leg.periodLabel && `, ${lowerFirst(leg.periodLabel)}`}
         <span className="mx-1.5">·</span>
@@ -936,7 +965,7 @@ function LegRow({ leg }: { leg: BoardLeg }) {
       </p>
 
       {leg.quarters ? (
-        <ol className="mt-3 grid grid-cols-4 gap-4">
+        <ol className="mt-2 grid grid-cols-4 gap-4">
           {leg.quarters.map((quarter, i) => {
             const quarterStarted = quarter.status !== "pending";
             return (
@@ -951,12 +980,12 @@ function LegRow({ leg }: { leg: BoardLeg }) {
           })}
         </ol>
       ) : (
-        <div className="mt-3">
+        <div className="mt-2">
           <LegBar leg={leg} value={leg.value} status={leg.status} started={started} />
         </div>
       )}
 
-      <p className="mt-2.5 flex justify-between type-fine text-muted-foreground">
+      <p className="mt-1.5 flex justify-between type-fine text-muted-foreground">
         <span>{leg.game.score ?? leg.game.label}</span>
         <span>
           {leg.game.state === "pre"
