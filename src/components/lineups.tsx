@@ -1,11 +1,13 @@
 "use client";
 
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { PanelHeader, SectionNav } from "@/components/section-nav";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Sidebar,
   SidebarContent,
@@ -61,10 +63,18 @@ export function Lineups() {
 
   // Shares the board's setting, so the panel stays open or closed when switching sections.
   const [panelOpen, setPanelOpen] = useStoredFlag("parlay-board:side-panel-open", true);
-  // Which league to show comes from the URL, so a league's view can be bookmarked; none means all of them.
-  const leagueParam = useSearchParams().get("league");
-  const league = data?.leagues.find((l) => l.id === leagueParam) ?? null;
-  const weeks = byWeek((data?.lineups ?? []).filter((l) => !league || l.leagueId === league.id));
+  // The league and page come from the URL, so a view can be bookmarked and the back button pages back.
+  const params = useSearchParams();
+  const league = data?.leagues.find((l) => l.id === params.get("league")) ?? null;
+  const lineups = ordered(data, league);
+  const page = Math.min(Math.max(1, Number.parseInt(params.get("page") ?? "", 10) || 1), Math.max(1, lineups.length));
+  const shown = lineups[page - 1] ?? null;
+  const pageHref = (n: number) => {
+    const query = new URLSearchParams();
+    if (league) query.set("league", league.id);
+    if (n > 1) query.set("page", String(n));
+    return query.size ? `/lineups?${query}` : "/lineups";
+  };
 
   return (
     <SidebarProvider open={panelOpen} onOpenChange={setPanelOpen}>
@@ -75,28 +85,30 @@ export function Lineups() {
           {data && data.leagues.length > 0 && <LeagueNav leagues={data.leagues} active={league} />}
         </SidebarContent>
       </Sidebar>
-      <SidebarInset>
-        <section className="flex-1 px-5 py-20 xl:pt-14">
-          <div className="mx-auto w-full max-w-[1100px]">
-            <div className="flex items-center gap-3">
+      {/* From tablet width up the page fits the window and only the player lists scroll; on a
+          phone the stacked card would leave too little room, so the page scrolls as usual. */}
+      <SidebarInset className="md:h-svh md:overflow-hidden">
+        <section className="flex flex-1 flex-col px-5 py-20 md:min-h-0 md:pb-6 xl:pt-14">
+          <div className="mx-auto flex w-full max-w-[1100px] flex-1 flex-col md:min-h-0">
+            <div className="flex shrink-0 items-center gap-3">
               <SidebarTrigger className="size-11 shrink-0 rounded-full bg-secondary/80 text-muted-foreground" />
               <h1 className="min-w-0 font-heading type-display sm:type-hero">{league ? `${league.name}.` : "Fantasy lineups."}</h1>
             </div>
 
             {league && (
-              <p className="mt-3 type-caption text-muted-foreground">
+              <p className="mt-3 shrink-0 type-caption text-muted-foreground">
                 {league.teamName} · {league.scoringLabel} · <span className="tabular-nums">{formatRecord(league.record)}</span>
               </p>
             )}
 
             {error && (
-              <p className="mt-8 max-w-xl rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
+              <p className="mt-8 max-w-xl shrink-0 rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
                 {data ? error : `Couldn't load lineups: ${error}`}
               </p>
             )}
 
             {data && data.problems.length > 0 && (
-              <ul className="mt-8 grid max-w-xl gap-1 rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
+              <ul className="mt-8 grid max-w-xl shrink-0 gap-1 rounded-xl border border-destructive/30 bg-card px-6 py-4 type-caption text-destructive">
                 {data.problems.map((problem) => (
                   <li key={problem}>{problem}</li>
                 ))}
@@ -105,23 +117,19 @@ export function Lineups() {
 
             {!data && !error && <p className="py-32 text-center type-caption text-muted-foreground">Loading lineups…</p>}
 
-            {data && weeks.length === 0 && (
+            {data && lineups.length === 0 && (
               <p className="py-32 text-center type-caption text-muted-foreground">
                 {data.leagues.length === 0 ? "No leagues yet." : `No lineups saved${league ? ` for ${league.name}` : ""} yet.`} Run{" "}
                 <code className="font-mono">/lineup</code> in Claude Code to add {data.leagues.length === 0 ? "one" : "this week’s"}.
               </p>
             )}
 
-            {weeks.map((week) => (
-              <section key={week.key} className="mt-10" aria-label={week.label}>
-                <h2 className="mb-3 type-caption font-semibold text-muted-foreground">{week.label}</h2>
-                <div className="grid gap-4">
-                  {week.lineups.map((lineup) => (
-                    <MatchupCard key={lineup.id} lineup={lineup} showLeague={!league} />
-                  ))}
-                </div>
-              </section>
-            ))}
+            {shown && (
+              <>
+                <Pager page={page} pages={lineups.length} href={pageHref} label={league ? "week" : "lineup"} />
+                <MatchupCard key={shown.id} lineup={shown} showLeague={!league} />
+              </>
+            )}
           </div>
         </section>
       </SidebarInset>
@@ -129,16 +137,37 @@ export function Lineups() {
   );
 }
 
-// The API returns lineups newest week first, so grouping keeps that order.
-function byWeek(lineups: Lineup[]): { key: string; label: string; lineups: Lineup[] }[] {
-  const weeks = new Map<string, { key: string; label: string; lineups: Lineup[] }>();
-  for (const lineup of lineups) {
-    const key = `${lineup.season}-${lineup.week}`;
-    const week = weeks.get(key) ?? { key, label: `Week ${lineup.week}, ${lineup.season}`, lineups: [] };
-    week.lineups.push(lineup);
-    weeks.set(key, week);
-  }
-  return [...weeks.values()];
+// Newest week first; within a week, leagues in the order they were set up, matching the sidebar.
+function ordered(data: LineupsData | null, league: League | null): Lineup[] {
+  if (!data) return [];
+  const rank = new Map(data.leagues.map((l, i) => [l.id, i]));
+  return data.lineups
+    .filter((l) => !league || l.leagueId === league.id)
+    .toSorted((a, b) => b.season - a.season || b.week - a.week || (rank.get(a.leagueId) ?? 0) - (rank.get(b.leagueId) ?? 0));
+}
+
+function Pager({ page, pages, href, label }: { page: number; pages: number; href: (page: number) => string; label: string }) {
+  if (pages < 2) return <div className="mt-8 shrink-0" />;
+  const step = (to: number, children: React.ReactNode, ariaLabel: string) =>
+    to < 1 || to > pages ? (
+      <Button variant="secondary" size="icon" disabled aria-label={ariaLabel}>
+        {children}
+      </Button>
+    ) : (
+      <Button variant="secondary" size="icon" aria-label={ariaLabel} nativeButton={false} render={<Link href={href(to)} scroll={false} />}>
+        {children}
+      </Button>
+    );
+
+  return (
+    <nav aria-label="Lineup pages" className="mt-8 mb-3 flex shrink-0 items-center justify-end gap-2">
+      <span className="mr-1 type-fine text-muted-foreground tabular-nums">
+        {label === "week" ? "Week" : "Lineup"} {page} of {pages}
+      </span>
+      {step(page - 1, <ChevronLeft />, label === "week" ? "Newer week" : "Previous lineup")}
+      {step(page + 1, <ChevronRight />, label === "week" ? "Older week" : "Next lineup")}
+    </nav>
+  );
 }
 
 const formatRecord = ({ won, lost, tie }: League["record"]) => `${won}-${lost}${tie ? `-${tie}` : ""}`;
@@ -197,30 +226,34 @@ function MatchupCard({ lineup, showLeague }: { lineup: Lineup; showLeague: boole
     : null;
 
   return (
-    <article id={lineup.id} className="scroll-mt-6 rounded-xl border bg-card">
-      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-3">
-        <p className="type-fine text-muted-foreground">{showLeague ? `${lineup.leagueName} · ${lineup.scoringLabel}` : lineup.scoringLabel}</p>
+    <article id={lineup.id} className="flex flex-col rounded-xl border bg-card md:min-h-0 md:flex-1">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-5 py-3">
+        <p className="type-fine text-muted-foreground">
+          <span className="font-semibold text-foreground">Week {lineup.week}</span>
+          {" · "}
+          {showLeague ? `${lineup.leagueName} · ${lineup.scoringLabel}` : lineup.scoringLabel}
+        </p>
         <Badge variant={badge.variant} className={badge.className}>
           {lineup.live && <span className="size-1.5 animate-pulse-soft rounded-full bg-current" />}
           {lineup.live ? "Live" : badge.label}
         </Badge>
       </header>
 
-      <div className={cn("grid divide-y md:divide-y-0 md:divide-x", sides.length > 1 && "md:grid-cols-2")}>
+      <div className={cn("grid divide-y md:min-h-0 md:flex-1 md:grid-rows-[minmax(0,1fr)] md:divide-y-0 md:divide-x", sides.length > 1 && "md:grid-cols-2")}>
         {sides.map((side, i) => (
           <SideColumn key={i} side={side} leading={side === leading} live={lineup.live} />
         ))}
       </div>
 
-      {lineup.notes && <p className="border-t px-5 py-3 type-fine text-muted-foreground">{lineup.notes}</p>}
+      {lineup.notes && <p className="shrink-0 border-t px-5 py-3 type-fine text-muted-foreground">{lineup.notes}</p>}
     </article>
   );
 }
 
 function SideColumn({ side, leading, live }: { side: LineupSide; leading: boolean; live: boolean }) {
   return (
-    <div className="min-w-0 px-5 py-4">
-      <div className="flex items-end justify-between gap-3">
+    <div className="flex min-w-0 flex-col md:min-h-0">
+      <div className="flex shrink-0 items-end justify-between gap-3 border-b px-5 py-4">
         <div className="min-w-0">
           <h3 className="truncate type-caption font-semibold">{side.name}</h3>
           <p className="type-fine text-muted-foreground">
@@ -237,24 +270,27 @@ function SideColumn({ side, leading, live }: { side: LineupSide; leading: boolea
         </p>
       </div>
 
-      <ol className="mt-4 divide-y">
-        {side.starters.map((player) => (
-          <PlayerRow key={player.id} player={player} />
-        ))}
-      </ol>
+      {/* The team's name and score stay put while the players scroll underneath. */}
+      <div className="px-5 pb-4 md:min-h-0 md:flex-1 md:overflow-y-auto md:overscroll-contain">
+        <ol className="divide-y">
+          {side.starters.map((player) => (
+            <PlayerRow key={player.id} player={player} />
+          ))}
+        </ol>
 
-      {side.bench.length > 0 && (
-        <>
-          <p className="mt-4 mb-1 type-fine text-muted-foreground">
-            Bench <span className="tabular-nums">· {formatPoints(side.bench.reduce((sum, p) => sum + p.points, 0))}</span>
-          </p>
-          <ol className="divide-y opacity-60">
-            {side.bench.map((player) => (
-              <PlayerRow key={player.id} player={player} />
-            ))}
-          </ol>
-        </>
-      )}
+        {side.bench.length > 0 && (
+          <>
+            <p className="mt-4 mb-1 type-fine text-muted-foreground">
+              Bench <span className="tabular-nums">· {formatPoints(side.bench.reduce((sum, p) => sum + p.points, 0))}</span>
+            </p>
+            <ol className="divide-y opacity-60">
+              {side.bench.map((player) => (
+                <PlayerRow key={player.id} player={player} />
+              ))}
+            </ol>
+          </>
+        )}
+      </div>
     </div>
   );
 }
