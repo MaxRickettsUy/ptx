@@ -4,6 +4,7 @@ Build NFL and NBA player-prop parlays by talking them through in Claude Code, th
 
 - **Building** (`/parlay` in Claude Code): describe the game, leg count and goal. Claude checks schedule, rosters, injuries and game logs through the `parlay` MCP server, asks you for the lines your book is offering, and saves the slip once you approve it.
 - **Fantasy lineups** (`/lineup` in Claude Code, `/lineups` in the app): set up each of your leagues once under whatever name you like, with your team name and its scoring (standard, half PPR or PPR). Then give Claude each week's lineup, and optionally your opponent's. It's scored live from the box score, with each player settled when their game ends, and every league keeps its own season record. Saving a league's lineup for the same week again replaces it.
+- **Hedging** (`/hedge` in Claude Code): Claude reads your saved matchup, finds your opponent's biggest remaining threats, and builds prop slips (usually singles) that pay if they boom. You give the lines; the slips go on the board.
 - **Board** (`/`): every saved parlay with per-leg progress. Polls every 15s while a game is live, every 60s otherwise, and writes final results to the database when games end.
 
 ## Run it
@@ -27,8 +28,8 @@ Then start Claude Code in this directory, approve the `parlay` MCP server when p
 | `src/lib/grade.ts` | Leg and parlay status rules. |
 | `src/lib/board.ts` | Joins saved legs with live stats and settles finished ones. |
 | `src/lib/fantasy.ts`, `src/lib/lineups.ts` | Fantasy slots, scoring presets and points rules; and scoring saved lineups live, settling each player when their game ends. |
-| `mcp/server.mts` | The MCP server Claude Code uses: five research tools, `save_parlay`, and `list_leagues`, `save_league` and `save_lineup` for fantasy. Registered in `.mcp.json`. |
-| `.claude/skills/parlay/`, `.claude/skills/lineup/` | The `/parlay` and `/lineup` skills: how a session should go. |
+| `mcp/server.mts` | The MCP server Claude Code uses: five research tools, `save_parlay`, and `list_leagues`, `save_league`, `save_lineup` and `get_matchup` for fantasy. Registered in `.mcp.json`. |
+| `.claude/skills/parlay/`, `.claude/skills/lineup/`, `.claude/skills/hedge/` | The `/parlay`, `/lineup` and `/hedge` skills: how a session should go. |
 | `src/lib/db.ts` | Supabase access for the Next.js server and the MCP server, using the secret key. Tables have RLS on with no policies. |
 
 After changing the schema, regenerate types with `supabase gen types typescript --local > src/lib/database.types.ts`.

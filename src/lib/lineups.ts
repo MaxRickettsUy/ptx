@@ -1,4 +1,5 @@
-import "server-only";
+// Shared by the Next server (/api/lineups) and the MCP server (get_matchup), so it can't be marked
+// server-only; like db.ts, never import it into a client component.
 
 import { listLeagues, listLineups, settleLineup, settleLineupPlayer, type LineupPlayerRow } from "./db";
 import { getGameStats, getScoreboard, headshotUrl, type Game, type GameStats } from "./espn";
@@ -18,6 +19,10 @@ import { EMPTY_LINE, type DefenseLine, type PlayerLine } from "./stats";
 
 export type LineupPlayer = {
   id: string;
+  /** Null for a team defense. */
+  athleteId: string | null;
+  /** Null when the player's team is on bye. */
+  eventId: string | null;
   slot: string;
   slotLabel: string;
   name: string;
@@ -131,6 +136,8 @@ export async function getLineups(): Promise<Lineups> {
     const players = lineup.lineup_players.map((row): { side: LineupPlayerRow["side"]; done: boolean; view: LineupPlayer } => {
       const base = {
         id: row.id,
+        athleteId: row.athlete_id,
+        eventId: row.event_id,
         slot: row.slot,
         slotLabel: isSlotKey(row.slot) ? SLOTS[row.slot].label : row.slot,
         name: row.player_name,

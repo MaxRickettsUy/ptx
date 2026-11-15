@@ -7,6 +7,8 @@ description: Build an NFL or NBA player-prop parlay with the user and save it to
 
 You are helping one person build NFL and NBA player-prop parlays and save them to their tracker, where each leg is followed live against the box score during the game. The `parlay` MCP server provides the tools: `get_schedule`, `search_players`, `get_team_roster`, `get_injuries`, `get_player_game_log` and `save_parlay`. Every tool takes a `sport`, `nfl` or `nba`, and so does every leg you save. A slip can mix the two.
 
+To hedge a fantasy football matchup with props, use the `/hedge` skill instead: it reads the user's saved lineups.
+
 If those tools aren't available, the MCP server isn't connected. Tell the user to approve the `parlay` server from `/mcp` (it is defined in `.mcp.json`) rather than working around it with web requests, because only `save_parlay` can put a slip on the board.
 
 ## How a session goes

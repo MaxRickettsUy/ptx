@@ -9,6 +9,7 @@ import { z } from "zod";
 import { createParlay, findLeague, listLeagues, saveLeague, saveLineup, type NewLineupPlayer } from "../src/lib/db";
 import { getGameLog, getGameStats, getInjuries, getRoster, getScoreboard, getTeams, searchPlayers, type Game } from "../src/lib/espn";
 import { SCORING, SCORING_KEYS, SLOT_KEYS, SLOTS, canFill } from "../src/lib/fantasy";
+import { getLineups, type LineupPlayer, type LineupSide } from "../src/lib/lineups";
 import { MODELS, type Model } from "../src/lib/labels";
 import { PERIOD_KEYS, SPORTS, STAT_KEYS, STATS, statsFor, type Sport } from "../src/lib/stats";
 
@@ -294,6 +295,61 @@ server.registerTool(
         created: !existing,
         league: { name: league.name, team_name: league.team_name, scoring: league.scoring },
         ...(existing && { was: { name: existing.name, team_name: existing.team_name, scoring: existing.scoring } }),
+      };
+    }),
+);
+
+server.registerTool(
+  "get_matchup",
+  {
+    description:
+      "Read a saved fantasy lineup: the user's team and, if saved, their opponent's, with live fantasy points, each player's athlete_id, event_id and game status. Use the ids directly in save_parlay. Defaults to the league's latest saved week.",
+    inputSchema: {
+      league: z.string().describe("The league's name, as list_leagues returns it"),
+      week: z.number().int().min(1).max(18).optional().describe("NFL regular-season week. Omit for the latest saved week."),
+    },
+  },
+  ({ league: leagueName, week }) =>
+    respond(async () => {
+      const league = await findLeague(leagueName);
+      if (!league) {
+        const known = (await listLeagues()).map((l) => l.name);
+        return { found: false, problems: [`No league called "${leagueName}". Leagues: ${known.join(", ") || "none yet"}.`] };
+      }
+      const { lineups, problems } = await getLineups();
+      const lineup = lineups.filter((l) => l.leagueId === league.id).find((l) => week === undefined || l.week === week);
+      if (!lineup) return { found: false, problems: [`No lineup saved in ${league.name}${week ? ` for week ${week}` : ""}.`] };
+
+      const player = (p: LineupPlayer) => ({
+        slot: p.slot,
+        athlete_id: p.athleteId,
+        event_id: p.eventId,
+        name: p.name,
+        position: p.position,
+        team: p.team,
+        points: p.points,
+        status: p.state === "post" ? "final" : p.state === "in" ? "live" : p.state === "bye" ? "bye" : "not started",
+        game: p.game ? `${p.game.label} · ${p.game.detail}` : null,
+        kickoff: p.game?.date ?? null,
+        stats: p.summary,
+      });
+      const side = (s: LineupSide) => ({
+        team: s.name,
+        points: s.points,
+        starters_still_to_finish: s.yetToFinish,
+        starters: s.starters.map(player),
+        bench: s.bench.map(player),
+      });
+
+      return {
+        found: true,
+        league: league.name,
+        scoring: lineup.scoringLabel,
+        week: lineup.week,
+        result: lineup.result,
+        mine: side(lineup.mine),
+        opponent: lineup.opponent ? side(lineup.opponent) : null,
+        problems,
       };
     }),
 );
