@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["*.local", "10.0.0.*", "192.168.*.*"],
   cacheComponents: true,
   partialPrefetching: true,
+  experimental: {
+    // Nudges coding agents when a Next.js release fixes a security advisory.
+    agentUpgrade: "security",
+  },
   turbopack: {
     rules: {
       "*.css": {
