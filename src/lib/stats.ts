@@ -20,6 +20,7 @@ export type PlayerLine = {
   rec: number;
   recYds: number;
   recTd: number;
+  fumLost: number;
   fgMade: number;
   kickPts: number;
   pts: number;
@@ -43,6 +44,7 @@ export const EMPTY_LINE: PlayerLine = {
   rec: 0,
   recYds: 0,
   recTd: 0,
+  fumLost: 0,
   fgMade: 0,
   kickPts: 0,
   pts: 0,
@@ -52,6 +54,16 @@ export const EMPTY_LINE: PlayerLine = {
   stl: 0,
   blk: 0,
   tov: 0,
+};
+
+/** What a team's defense and special teams did in one game, for fantasy D/ST scoring. */
+export type DefenseLine = {
+  pointsAllowed: number;
+  sacks: number;
+  interceptions: number;
+  fumblesRecovered: number;
+  /** Defensive and return touchdowns: pick-sixes, fumble returns, kick and punt returns. */
+  touchdowns: number;
 };
 
 type StatDef = {

@@ -3,7 +3,7 @@
 // stats provider can replace it without touching the rest of the app.
 
 import type { GameState } from "./grade";
-import { EMPTY_LINE, type PlayerLine, type Sport } from "./stats";
+import { EMPTY_LINE, type DefenseLine, type PlayerLine, type Sport } from "./stats";
 
 // ESPN files each league under its sport: football/nfl, basketball/nba.
 const LEAGUES: Record<Sport, { sport: string; league: string }> = {
@@ -42,6 +42,8 @@ export type PlayerSummary = {
 export type GameStats = {
   game: Game;
   players: Record<string, { name: string; team: string; line: PlayerLine }>;
+  /** Each NFL team's defense and special teams, by abbreviation. Empty for the NBA. */
+  defenses: Record<string, DefenseLine>;
 };
 
 export type QuarterStats = {
@@ -136,12 +138,12 @@ export function forgetScoreboards(week?: number) {
 export async function getScoreboard(
   sport: Sport,
   when: { week?: number; date?: string } = {},
-): Promise<{ week: number | null; date: string | null; games: Game[] }> {
+): Promise<{ season: number | null; week: number | null; date: string | null; games: Game[] }> {
   const date = when.date?.replaceAll("-", "");
   const data = await scoreboardData(sport, { week: when.week, date });
   const weekNumber: number | null = sport === "nfl" ? (data.week?.number ?? when.week ?? 0) : null;
   const games: Game[] = (data.events ?? []).map((event: any) => toGame(event.competitions[0], weekNumber));
-  return { week: weekNumber, date: data.day?.date ?? when.date ?? null, games };
+  return { season: data.season?.year ?? null, week: weekNumber, date: data.day?.date ?? when.date ?? null, games };
 }
 
 export type ScoreTeam = TeamSide & { name: string; record: string | null; quarters: number[] };
@@ -217,6 +219,9 @@ const NFL_BOX_FIELDS: Record<string, BoxFields> = {
     receivingYards: (line, raw) => void (line.recYds = num(raw)),
     receivingTouchdowns: (line, raw) => void (line.recTd = num(raw)),
   },
+  fumbles: {
+    fumblesLost: (line, raw) => void (line.fumLost = num(raw)),
+  },
   kicking: {
     "fieldGoalsMade/fieldGoalAttempts": (line, raw) => void (line.fgMade = num(raw.split("/")[0])),
     totalKickingPoints: (line, raw) => void (line.kickPts = num(raw)),
@@ -259,8 +264,38 @@ export async function getGameStats(eventId: string, sport: Sport): Promise<GameS
         }
       }
     }
-    return { game, players };
+    return { game, players, defenses: sport === "nfl" ? defenseLines(data, game) : {} };
   });
+}
+
+// A team's D/ST line comes from its box-score category totals. defensiveTouchdowns already counts
+// interception and fumble returns, so only the kick and punt return scores are added to it.
+// Fumble recoveries are the opponent's fumbles lost: the team's own fumblesRecovered also counts
+// the offense falling on its own fumbles.
+function defenseLines(data: any, game: Game): Record<string, DefenseLine> {
+  const teamStat = (abbr: string, name: string) =>
+    num((data.boxscore?.teams ?? []).find((t: any) => t.team.abbreviation === abbr)?.statistics?.find((s: any) => s.name === name)?.displayValue);
+  const lines: Record<string, DefenseLine> = {};
+
+  for (const team of [game.home, game.away]) {
+    const opponent = team === game.home ? game.away : game.home;
+    const box = (data.boxscore?.players ?? []).find((t: any) => t.team.abbreviation === team.abbr);
+    const total = (category: string, key: string) => {
+      const c = (box?.statistics ?? []).find((x: any) => x.name === category);
+      return num(c?.totals?.[(c.keys ?? []).indexOf(key)]);
+    };
+    lines[team.abbr] = {
+      pointsAllowed: opponent.score,
+      sacks: total("defensive", "sacks"),
+      interceptions: total("interceptions", "interceptions"),
+      fumblesRecovered: teamStat(opponent.abbr, "fumblesLost"),
+      touchdowns:
+        total("defensive", "defensiveTouchdowns") +
+        total("kickReturns", "kickReturnTouchdowns") +
+        total("puntReturns", "puntReturnTouchdowns"),
+    };
+  }
+  return lines;
 }
 
 // Yards between two spots as the play-by-play writes them: "BLT 41", or a bare "50" at midfield.

@@ -1,18 +1,21 @@
-// MCP server that lets Claude Code research NFL and NBA props and save parlays to the tracker.
+// MCP server that lets Claude Code research NFL and NBA props and save parlays to the tracker,
+// and save season-long fantasy lineups.
 // Registered in .mcp.json; it talks over stdio, so nothing here may write to stdout.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import path from "node:path";
 import { z } from "zod";
-import { createParlay } from "../src/lib/db";
-import { getGameLog, getGameStats, getInjuries, getRoster, getScoreboard, searchPlayers, type Game } from "../src/lib/espn";
+import { createParlay, findLeague, listLeagues, saveLeague, saveLineup, type NewLineupPlayer } from "../src/lib/db";
+import { getGameLog, getGameStats, getInjuries, getRoster, getScoreboard, getTeams, searchPlayers, type Game } from "../src/lib/espn";
+import { SCORING, SCORING_KEYS, SLOT_KEYS, SLOTS, canFill } from "../src/lib/fantasy";
 import { MODELS, type Model } from "../src/lib/labels";
 import { PERIOD_KEYS, SPORTS, STAT_KEYS, STATS, statsFor, type Sport } from "../src/lib/stats";
 
 process.loadEnvFile(path.join(import.meta.dirname, "..", ".env.local"));
 
 const BOARD_URL = "http://localhost:3000";
+const LINEUPS_URL = `${BOARD_URL}/lineups`;
 
 const server = new McpServer({ name: "parlay", version: "0.1.0" });
 
@@ -251,6 +254,164 @@ server.registerTool(
         labels: { human: human_involved, model: model_involved ? (model ?? connectedModel()) : null, mock: mock ?? false },
       });
       return { saved: true, parlay_id: parlayId, board_url: BOARD_URL, legs: valid };
+    }),
+);
+
+server.registerTool(
+  "list_leagues",
+  {
+    description: "List the user's fantasy leagues: each one's name, their team's name in it, and its scoring. save_lineup takes one of these names.",
+    inputSchema: {},
+  },
+  () =>
+    respond(async () => ({
+      leagues: (await listLeagues()).map((l) => ({ name: l.name, team_name: l.team_name, scoring: l.scoring })),
+    })),
+);
+
+server.registerTool(
+  "save_league",
+  {
+    description: `Create a fantasy league, or change one: its name, the user's team name in it, or its scoring. A league's name is whatever the user calls it and must be unique, ignoring case. To rename a league pass its old name as current_name. Changing scoring re-scores every week that hasn't finished. Scoring presets: ${SCORING_KEYS.map((key) => `${key} (${SCORING[key].label})`).join(", ")}.`,
+    inputSchema: {
+      name: z.string().min(1).describe("The league's name as the user wants it shown, e.g. 'Work league'"),
+      team_name: z.string().min(1).describe("The user's fantasy team name in this league"),
+      scoring: z.enum(SCORING_KEYS).describe("The league's scoring: standard (no points per catch), half_ppr or ppr"),
+      current_name: z.string().optional().describe("Only when changing an existing league's name: what it's called now"),
+    },
+  },
+  ({ name, team_name, scoring, current_name }) =>
+    respond(async () => {
+      const existing = await findLeague(current_name ?? name);
+      if (current_name && !existing) {
+        const known = (await listLeagues()).map((l) => l.name);
+        return { saved: false, problems: [`No league called "${current_name}". Leagues: ${known.join(", ") || "none yet"}.`] };
+      }
+      // Only an explicit rename changes a league's name; matching one by name keeps its spelling.
+      const league = await saveLeague({ id: existing?.id, name: current_name || !existing ? name : existing.name, teamName: team_name, scoring });
+      return {
+        saved: true,
+        created: !existing,
+        league: { name: league.name, team_name: league.team_name, scoring: league.scoring },
+        ...(existing && { was: { name: existing.name, team_name: existing.team_name, scoring: existing.scoring } }),
+      };
+    }),
+);
+
+const lineupPlayer = z.object({
+  slot: z.enum(SLOT_KEYS).describe("The lineup slot. BN is the bench, which doesn't count towards the score."),
+  athlete_id: z
+    .string()
+    .optional()
+    .describe("ESPN athlete id exactly as returned by search_players or get_team_roster. Leave out for a team defense (slot DST, or a defense on the bench)."),
+  player_name: z.string().describe("The player's name, or the team for a defense"),
+  team: z.string().describe("The player's NFL team abbreviation, e.g. KC. For a defense, the team whose D/ST it is."),
+});
+
+server.registerTool(
+  "save_lineup",
+  {
+    description: `Save a season-long fantasy football lineup for one NFL week to one of the user's leagues, where its points are scored live from the box score with that league's scoring. Create the league first with save_league. Only call this after the user has confirmed every player and slot. A league has one lineup a week, so saving the same league and week again replaces it; use that after a swap too. Slots: ${SLOT_KEYS.map((key) => `${key} (${SLOTS[key].positions.join("/")})`).join(", ")}.`,
+    inputSchema: {
+      league: z.string().describe("The league's name, as list_leagues returns it"),
+      week: z.number().int().min(1).max(18).optional().describe("NFL regular-season week. Omit for the current week."),
+      notes: z.string().optional().describe("A sentence on the week's thinking, such as a start/sit call; shown with the lineup"),
+      players: z.array(lineupPlayer).min(1).max(30).describe("The user's starters, then their bench"),
+      opponent_name: z.string().optional().describe("This week's opponent's fantasy team name, for a head-to-head matchup"),
+      opponent_players: z.array(lineupPlayer).max(30).optional().describe("The opponent's starters and bench, if the user gave them"),
+    },
+  },
+  ({ league: leagueName, week, notes, players, opponent_name, opponent_players }) =>
+    respond(async () => {
+      const league = await findLeague(leagueName);
+      if (!league) {
+        const known = (await listLeagues()).map((l) => l.name);
+        return {
+          saved: false,
+          problems: [`No league called "${leagueName}". Leagues: ${known.join(", ") || "none yet"}. Create it with save_league first.`],
+        };
+      }
+      const board = await getScoreboard("nfl", { week });
+      if (!board.week || !board.season) return { saved: false, problems: ["Couldn't tell which NFL week this is. Pass week explicitly."] };
+      const teams = await getTeams("nfl");
+      const problems: string[] = [];
+      const warnings: string[] = [];
+
+      const resolve = async (player: z.infer<typeof lineupPlayer>, side: "mine" | "opponent"): Promise<NewLineupPlayer | null> => {
+        const abbr = player.team.toUpperCase();
+        const team = teams.find((t) => t.abbr === abbr);
+        if (!team) {
+          problems.push(`${player.player_name}: unknown team ${player.team}.`);
+          return null;
+        }
+
+        let name: string;
+        let position: string;
+        let athleteId: string | null = null;
+        if (player.athlete_id === undefined) {
+          if (player.slot !== "DST" && player.slot !== "BN") {
+            problems.push(`${player.player_name}: athlete_id is required in the ${player.slot} slot. Only a defense goes without one.`);
+            return null;
+          }
+          name = `${team.name} D/ST`;
+          position = "DST";
+        } else {
+          const roster = await getRoster(abbr, "nfl");
+          const found = roster.players.find((p: { athleteId: string }) => p.athleteId === player.athlete_id);
+          if (!found) {
+            problems.push(`${player.player_name}: athlete_id ${player.athlete_id} is not on the ${abbr} roster. Look them up with search_players.`);
+            return null;
+          }
+          name = found.name;
+          position = found.position ?? "";
+          athleteId = player.athlete_id;
+        }
+        if (!canFill(player.slot, position)) {
+          problems.push(`${name}: a ${position || "player with no position"} can't fill the ${player.slot} slot.`);
+          return null;
+        }
+
+        const game = board.games.find((g) => g.home.abbr === abbr || g.away.abbr === abbr);
+        // A team on bye scores nothing, which is final from the start.
+        if (!game && player.slot !== "BN") warnings.push(`${name} is starting but ${abbr} is on bye in week ${board.week}.`);
+        return {
+          side,
+          slot: player.slot,
+          athlete_id: athleteId,
+          player_name: name,
+          team_abbr: abbr,
+          player_position: position,
+          event_id: game?.id ?? null,
+          game_label: game?.label ?? null,
+          game_date: game?.date ?? null,
+          final_points: game ? null : 0,
+          final_stats: null,
+        };
+      };
+
+      const resolved = await Promise.all([
+        ...players.map((p) => resolve(p, "mine")),
+        ...(opponent_players ?? []).map((p) => resolve(p, "opponent")),
+      ]);
+      if (problems.length > 0) return { saved: false, problems };
+
+      const { id, replaced } = await saveLineup({
+        leagueId: league.id,
+        season: board.season,
+        week: board.week,
+        opponentName: opponent_name ?? null,
+        notes: notes ?? null,
+        players: resolved.filter((p) => p !== null),
+      });
+      return {
+        saved: true,
+        lineup_id: id,
+        league: league.name,
+        replaced_earlier_lineup: replaced,
+        week: board.week,
+        lineups_url: `${LINEUPS_URL}?league=${league.id}`,
+        warnings,
+      };
     }),
 );
 

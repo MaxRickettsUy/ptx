@@ -49,6 +49,7 @@ export function demoGameStats(eventId: string, now: Date): GameStats {
       away: { id: "demo-away", abbr: "AWY", score: Math.floor(20 * progress) },
     },
     players,
+    defenses: {},
   };
 }
 

@@ -34,6 +34,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      leagues: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          scoring: string
+          team_name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          scoring: string
+          team_name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          scoring?: string
+          team_name?: string
+        }
+        Relationships: []
+      }
       legs: {
         Row: {
           athlete_id: string
@@ -104,6 +128,118 @@ export type Database = {
             columns: ["parlay_id"]
             isOneToOne: false
             referencedRelation: "parlays"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lineup_players: {
+        Row: {
+          athlete_id: string | null
+          created_at: string
+          event_id: string | null
+          final_points: number | null
+          final_stats: Json | null
+          game_date: string | null
+          game_label: string | null
+          id: string
+          lineup_id: string
+          player_name: string
+          player_position: string | null
+          position_in_lineup: number
+          side: string
+          slot: string
+          team_abbr: string
+        }
+        Insert: {
+          athlete_id?: string | null
+          created_at?: string
+          event_id?: string | null
+          final_points?: number | null
+          final_stats?: Json | null
+          game_date?: string | null
+          game_label?: string | null
+          id?: string
+          lineup_id: string
+          player_name: string
+          player_position?: string | null
+          position_in_lineup?: number
+          side?: string
+          slot: string
+          team_abbr: string
+        }
+        Update: {
+          athlete_id?: string | null
+          created_at?: string
+          event_id?: string | null
+          final_points?: number | null
+          final_stats?: Json | null
+          game_date?: string | null
+          game_label?: string | null
+          id?: string
+          lineup_id?: string
+          player_name?: string
+          player_position?: string | null
+          position_in_lineup?: number
+          side?: string
+          slot?: string
+          team_abbr?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lineup_players_lineup_id_fkey"
+            columns: ["lineup_id"]
+            isOneToOne: false
+            referencedRelation: "lineups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lineups: {
+        Row: {
+          created_at: string
+          id: string
+          league_id: string
+          notes: string | null
+          opponent_name: string | null
+          opponent_points: number | null
+          points: number | null
+          result: string | null
+          season: number
+          settled_at: string | null
+          week: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          league_id: string
+          notes?: string | null
+          opponent_name?: string | null
+          opponent_points?: number | null
+          points?: number | null
+          result?: string | null
+          season: number
+          settled_at?: string | null
+          week: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          league_id?: string
+          notes?: string | null
+          opponent_name?: string | null
+          opponent_points?: number | null
+          points?: number | null
+          result?: string | null
+          season?: number
+          settled_at?: string | null
+          week?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lineups_league_id_fkey"
+            columns: ["league_id"]
+            isOneToOne: false
+            referencedRelation: "leagues"
             referencedColumns: ["id"]
           },
         ]

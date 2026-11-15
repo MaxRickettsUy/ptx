@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ptx tracks NFL and NBA player-prop parlays. Slips are built conversationally in Claude Code via the `/parlay` skill (`.claude/skills/parlay/`) and the `parlay` MCP server, saved to Supabase, and shown on a Next.js board that grades every leg live against ESPN's box score. Two more sections, Scores (`/scores`) and Stats (`/stats`), show weekly NFL results and season-to-date team totals; they don't cover the NBA.
+ptx tracks NFL and NBA player-prop parlays. Slips are built conversationally in Claude Code via the `/parlay` skill (`.claude/skills/parlay/`) and the `parlay` MCP server, saved to Supabase, and shown on a Next.js board that grades every leg live against ESPN's box score. Two more sections, Scores (`/scores`) and Stats (`/stats`), show weekly NFL results and season-to-date team totals; they don't cover the NBA. Lineups (`/lineups`) tracks season-long fantasy football lineups, saved via the `/lineup` skill and scored live from the same box scores.
 
 ## Commands
 
@@ -25,7 +25,7 @@ Env lives in `.env.local` (from `.env.example`): `SUPABASE_URL` and `SUPABASE_SE
 
 ## Architecture
 
-**Data flows one way: ESPN → `src/lib` → API routes → client components that poll.** Every page is a client component (`src/components/{board,scores,stats}.tsx`) that fetches its `/api/*` route and polls (15s while a game is live, 60s otherwise; stats every 5 min). `next.config.ts` has `cacheComponents: true`, so pages that read `useSearchParams` are wrapped in `<Suspense>`.
+**Data flows one way: ESPN → `src/lib` → API routes → client components that poll.** Every page is a client component (`src/components/{board,scores,stats,lineups}.tsx`) that fetches its `/api/*` route and polls (15s while a game is live, 60s otherwise; stats every 5 min). `next.config.ts` has `cacheComponents: true`, so pages that read `useSearchParams` are wrapped in `<Suspense>`.
 
 - `src/lib/espn.ts` is the **only** file that knows ESPN's undocumented response shapes; swapping stats providers means replacing it. Every call takes a `Sport` (`nfl` | `nba`); each leg stores its sport in `legs.sport`, so one slip can mix leagues. The NFL slate is a week, the NBA's a day. It has an in-memory TTL cache (`cached()`), so data is per server process. Scoreboards are cached by week and TTL; `forgetScoreboards()` clears them and backs the `POST /api/scores` and `POST /api/stats` refresh endpoints.
 - Quarter-by-quarter player stats aren't in the box score. `quarterStatsFromPlays` rebuilds them from play-by-play text, and `board.ts` refuses to settle a quarter leg whose quarters don't sum to the official box-score total. That parser is NFL-only, so `save_parlay` limits NBA legs to `period: game`.
@@ -34,6 +34,7 @@ Env lives in `.env.local` (from `.env.example`): `SUPABASE_URL` and `SUPABASE_SE
 - `src/lib/board.ts` joins saved legs with live stats. **It also settles on read:** when a game is final, `getBoard()` writes leg and parlay results back to the database as a side effect of `GET /api/board`.
 - `src/lib/demo.ts`: any leg whose `event_id` starts with `demo-` is graded against a simulated, always-live game on a one-hour loop, for trying the board when no real game is on.
 - Team logos live in `public/team-logos/{nfl,nba}/` (the leagues share abbreviations) and are downloaded by `pnpm logos`.
+- `src/lib/fantasy.ts` holds the lineup slots, scoring presets (`standard`, `half_ppr`, `ppr`) and the pure points rules. Each lineup belongs to a row in `leagues` (a user-chosen name, unique ignoring case, plus the team name and scoring), one lineup per league per week; the page filters by `?league=<id>`. `src/lib/lineups.ts` is the lineups page's `board.ts`: it scores saved lineups against live box scores and **also settles on read**, writing each player's final points and stat line once their game is final, then the lineup's totals and result. D/ST lines come from team totals in `espn.ts` (`GameStats.defenses`).
 - `src/lib/season.ts` totals every regular-season week's final scores per team for the Stats page. Finished weeks are fetched with a 1-hour TTL.
 - `src/lib/db.ts` uses the Supabase **secret key** (bypasses RLS; tables have RLS on with no policies). It's shared by the Next server and the MCP server; never import it into a client component.
 

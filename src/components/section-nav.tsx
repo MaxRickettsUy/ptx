@@ -1,6 +1,6 @@
 "use client";
 
-import { ChartColumn, LayoutList, Trophy } from "lucide-react";
+import { ChartColumn, LayoutList, Trophy, UsersRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -17,6 +17,7 @@ const SECTIONS = [
   { href: "/", label: "Parlays", icon: LayoutList },
   { href: "/scores", label: "Scores", icon: Trophy },
   { href: "/stats", label: "Stats", icon: ChartColumn },
+  { href: "/lineups", label: "Lineups", icon: UsersRound },
 ];
 
 /** The app name and when the page's data was last fetched, at the top of each left panel. */

@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import type { Database } from "./database.types";
+import type { Database, Json } from "./database.types";
 import type { Direction } from "./grade";
 import { isModel, type SlipLabels } from "./labels";
 import type { Sport } from "./stats";
@@ -157,6 +157,152 @@ export async function settleParlay(id: string, result: "won" | "lost" | "push"):
   const { error } = await db()
     .from("parlays")
     .update({ result, settled_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export type LineupPlayerRow = {
+  id: string;
+  lineup_id: string;
+  side: "mine" | "opponent";
+  slot: string;
+  position_in_lineup: number;
+  /** Null for a team defense. */
+  athlete_id: string | null;
+  player_name: string;
+  team_abbr: string;
+  player_position: string | null;
+  /** Null when the player's team is on bye. */
+  event_id: string | null;
+  game_label: string | null;
+  game_date: string | null;
+  final_points: number | null;
+  final_stats: unknown;
+};
+
+export type LeagueRow = {
+  id: string;
+  name: string;
+  team_name: string;
+  scoring: string;
+  created_at: string;
+};
+
+export type LineupRow = {
+  id: string;
+  league_id: string;
+  season: number;
+  week: number;
+  opponent_name: string | null;
+  notes: string | null;
+  points: number | null;
+  opponent_points: number | null;
+  result: "won" | "lost" | "tie" | null;
+  settled_at: string | null;
+  created_at: string;
+  lineup_players: LineupPlayerRow[];
+};
+
+export type NewLineupPlayer = Omit<LineupPlayerRow, "id" | "lineup_id" | "position_in_lineup">;
+
+export async function listLineups(): Promise<LineupRow[]> {
+  const { data, error } = await db()
+    .from("lineups")
+    .select("*, lineup_players(*)")
+    .order("season", { ascending: false })
+    .order("week", { ascending: false })
+    .order("created_at", { ascending: false })
+    .order("position_in_lineup", { referencedTable: "lineup_players", ascending: true })
+    .limit(200);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as LineupRow[];
+}
+
+export async function listLeagues(): Promise<LeagueRow[]> {
+  const { data, error } = await db().from("leagues").select("*").order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
+
+/** The league with this name, ignoring case, or null. */
+export async function findLeague(name: string): Promise<LeagueRow | null> {
+  const leagues = await listLeagues();
+  return leagues.find((l) => l.name.toLowerCase() === name.trim().toLowerCase()) ?? null;
+}
+
+/** Creates a league, or updates the one with `id`: its name, team name and scoring. */
+export async function saveLeague(input: { id?: string; name: string; teamName: string; scoring: string }): Promise<LeagueRow> {
+  const fields = { name: input.name.trim(), team_name: input.teamName, scoring: input.scoring };
+  const { data, error } = input.id
+    ? await db().from("leagues").update(fields).eq("id", input.id).select("*").single()
+    : await db().from("leagues").insert(fields).select("*").single();
+  if (error) throw new Error(error.code === "23505" ? `There is already a league called "${fields.name}".` : error.message);
+  return data;
+}
+
+/** Saves a league's lineup for a week, replacing any it already has for that week. */
+export async function saveLineup(input: {
+  leagueId: string;
+  season: number;
+  week: number;
+  opponentName: string | null;
+  notes: string | null;
+  players: NewLineupPlayer[];
+}): Promise<{ id: string; replaced: boolean }> {
+  const { data: old, error: findError } = await db()
+    .from("lineups")
+    .select("id")
+    .eq("league_id", input.leagueId)
+    .eq("season", input.season)
+    .eq("week", input.week)
+    .maybeSingle();
+  if (findError) throw new Error(findError.message);
+  if (old) await deleteLineup(old.id);
+
+  const { data, error } = await db()
+    .from("lineups")
+    .insert({
+      league_id: input.leagueId,
+      season: input.season,
+      week: input.week,
+      opponent_name: input.opponentName,
+      notes: input.notes,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  const lineupId = data.id;
+
+  const { error: playersError } = await db()
+    .from("lineup_players")
+    .insert(input.players.map((player, i) => ({ ...player, final_stats: player.final_stats as Json, lineup_id: lineupId, position_in_lineup: i })));
+  if (playersError) {
+    await deleteLineup(lineupId);
+    throw new Error(playersError.message);
+  }
+  return { id: lineupId, replaced: old !== null };
+}
+
+export async function deleteLineup(id: string): Promise<void> {
+  const { error } = await db().from("lineups").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function settleLineupPlayer(id: string, points: number, stats: object): Promise<void> {
+  const { error } = await db()
+    .from("lineup_players")
+    .update({ final_points: points, final_stats: stats as Json })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function settleLineup(
+  id: string,
+  totals: { points: number; opponentPoints: number | null; result: "won" | "lost" | "tie" | null },
+): Promise<void> {
+  const { error } = await db()
+    .from("lineups")
+    .update({ points: totals.points, opponent_points: totals.opponentPoints, result: totals.result, settled_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw new Error(error.message);
 }
