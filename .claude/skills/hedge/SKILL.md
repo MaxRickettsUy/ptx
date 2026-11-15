@@ -1,66 +1,72 @@
 ---
 name: hedge
-description: Build prop slips that hedge the user's fantasy football matchup, using their saved lineup and their opponent's, and save them to the ptx parlay board. Use when the user wants to hedge a fantasy matchup, bet against their opponent's players, or protect a fantasy week with props.
+description: Recommend prop parlays that hedge the user's fantasy football matchup, combining overs on their opponent's players with unders on their own, and save the ones they pick to the ptx parlay board. Use when the user wants to hedge a fantasy matchup, bet against their opponent's players or their own, or protect a fantasy week with props.
 ---
 
 # Hedging a fantasy matchup
 
-You are helping one person place NFL player props that pay off when their fantasy week goes badly, so a loss in their league is cushioned by a win at the sportsbook. Their lineups live in the ptx tracker; the slips you build go on the same parlay board as `/parlay` slips.
+You are helping one person build NFL prop parlays that cash when their fantasy week goes badly: when their own players flop, when their opponent's players go off, or both. The slips are a consolation prize: if they lose their matchup, they should have something to root for. Their lineups live in the ptx tracker; the slips you build go on the same parlay board as `/parlay` slips.
 
 The `parlay` MCP server provides the tools: `list_leagues` and `get_matchup` to read the fantasy side, the research tools `get_schedule`, `get_team_roster`, `get_injuries` and `get_player_game_log` (pass `sport: nfl`), and `save_parlay` to save a slip. If they aren't available, tell the user to reconnect the `parlay` server from `/mcp` rather than working around it.
 
-## How a hedge works
+## How a hedge leg works
 
-The user loses their matchup when their opponent's players outscore theirs. So a hedge leg is one of:
+Every leg must win in the same situation the user's fantasy team loses. So a leg is one of:
 
-- **An over on an opponent's starter.** If the opponent's player has a big game, the user is more likely to lose, and the bet cashes. This is the main tool.
-- **An under on one of the user's own starters.** If their own player flops, the bet cashes. Use it sparingly: it's a bet against their own team, and many people don't want that. Ask before proposing any.
+- **An under on one of the user's own starters.** It cashes when that player flops.
+- **An over on one of the opponent's starters.** It cashes when that player goes off.
 
-Never suggest a leg that wins in the same situation the user's fantasy team wins, such as an over on their own player or an under on the opponent's. That doubles their exposure instead of hedging it.
+Both are first-class; the user wants slips that combine players from both teams. Never include a leg that wins when the user's fantasy team wins (an over on their own player, an under on the opponent's): that doubles their exposure instead of hedging it.
 
 Only players whose games haven't started can be hedged at pre-game lines. A live game needs a live line from the user's book, so say so if they want one.
 
-## Prompt, don't interview
+## Recommend, don't interview
 
-Walk the user through with the `AskUserQuestion` tool, as `/lineup` does: 2 to 4 options a question, with "Other" for typed answers, and up to four related questions in one call. Keep prose between prompts to a line or two.
+Do the research and come back with ready-made slips for the user to pick from. Don't ask which players to hedge against or which markets to use; those are your recommendations to make. Use the `AskUserQuestion` tool, as `/lineup` does, only for the matchup, for choosing among your slips, and for lines, stake and saving. Keep prose between prompts short.
 
 ### 1. Matchup
 
-Call `list_leagues`. With one league use it; with several, prompt "Which matchup do you want to hedge?" with each league as an option, showing its team name. Then call `get_matchup`. If it has no opponent, the user can't hedge against one: offer to add the opponent with `/lineup`, or to hedge with unders on their own players only.
+Call `list_leagues`. With one league use it; with several, prompt "Which matchup do you want to hedge?" with each league as an option, showing its team name. Then call `get_matchup`. If it has no opponent, build slips from unders on the user's own players only, and offer to add the opponent with `/lineup`.
 
 Show the state of the matchup in a line: the score, and how many starters each side still has to play.
 
-### 2. Find the swing players
+### 2. Research both sides
 
-From the opponent's starters still to play, rank the ones whose big games would hurt the user most: high-usage running backs and receivers, the quarterback, and anyone with touchdown upside. Check each against `get_injuries` and their last few games with `get_player_game_log`. Skip players who are out or doubtful, kickers and defenses (no props for them), and anyone whose game is final or under way.
+For every starter still to play on both teams (skip quarterbacks, kickers, defenses, and anyone whose game is final or under way; include a quarterback only if the user asks), check `get_injuries` for their team and their last four to six games with `get_player_game_log`. Skip players who are out or doubtful; flag anyone questionable.
 
-Watch for overlap:
+Pick a market and direction for each player:
 
-- **The same player on both sides** (possible across a shared NFL team, never in one league) cancels out; skip him.
-- **Players in the same NFL game** as the user's own starters are correlated. An over on the opponent's receiver can also mean a shootout that helps the user's players in that game, so it's a weaker hedge. Say so.
+- **The user's players (unders):** the stat their fantasy points lean on, at a line they've been missing lately or that a tough matchup threatens: receiving yards or receptions for receivers and tight ends (receptions in PPR), rush + rec yards for backs. Avoid `touchdowns` under 0.5 on a back or receiver with a heavy red-zone role; it's usually heavily juiced.
+- **The opponent's players (overs):** the stat that tracks their ceiling. `touchdowns` over 0.5 (anytime TD) swings fantasy weeks most; yardage and receptions work too.
 
-Prompt with the three or four best candidates as a multi-select ("Which players do you want to hedge against?"), each labelled with team, position, kickoff and a one-line reason drawn from the data.
+Only use markets `save_parlay` lists for the NFL.
 
-### 3. Pick markets and get lines
+### 3. Build the slips
 
-For each chosen player, suggest the market that best tracks their fantasy points: receiving yards or receptions for receivers and tight ends (receptions matter more in PPR), rush + rec yards for backs, passing yards or passing TDs for quarterbacks, and `touchdowns` (anytime TD, over 0.5) for anyone, since touchdowns swing fantasy weeks most. Only use markets `save_parlay` lists for the NFL.
+Recommend about three different parlays of at least six legs each, mixing players from both teams. Give each a short name and a one-line idea, for example:
 
-There's no odds feed, so never invent a line. Prompt for each one, offering the market you suggested and an alternative, and ask the user to type their book's number in Other. "60+" is over 59.5.
+- **Nightmare week**: unders on the user's most important players plus overs on the opponent's top threats. The scenario that hurts most, so the biggest payout.
+- **Same-game story**: legs from one or two NFL games that tell one story, e.g. the user's receivers under plus the opponent's running backs over when those teams are likely to lean on the run. Correlation within a slip is good here: it makes the legs hit together.
+- **Afternoon collapse**: the user's lesser starters doing nothing plus the opponent's depth producing, for when the stars are a wash.
 
-### 4. Singles or a parlay
+Within a slip, prefer legs that tend to hit together. Avoid pairs that pull against each other: an under on the user's receiver and an over on the opponent's receiver in the same game both need opposite game scripts, so they rarely both hit. Say so if a slip has a pair like that.
 
-Say plainly that a parlay hedge only pays if every leg hits, which makes it a weak hedge: the user can lose their matchup and still lose the slip. Separate single-leg slips are the real hedge; a two-leg parlay on the opponent's two biggest threats is a reasonable middle ground for a bigger payout. Prompt with "Separate singles", "One parlay" and "Two-leg parlay on the top two".
+Don't reuse the same leg in every slip; a player can appear in at most two slips, so one result doesn't decide them all. The same player on both teams cancels out; leave him out.
 
-Each single is its own `save_parlay` call with one leg.
+Show the slips as a compact list: name, the idea, and each leg as `Player (TEAM) over/under market`, with the reason drawn from the data (e.g. "under 4 catches in three straight"). Then prompt "Which slips do you want?" as a multi-select with each slip as an option. The user can ask for changes in Other.
+
+### 4. Lines
+
+There's no odds feed, so never save a line the user hasn't approved. Estimate each leg's line from the game log and prompt once per slip (up to four slips a call), listing that slip's estimates, with the options "Use these lines" and "I'll type them". If they type their own, take those. Anytime-TD legs are 0.5 and need no prompt. "60+" is over 59.5. Ask in the same call whether they're placing the slips or tracking them as mock.
 
 ### 5. Stake and save
 
-Ask the stake and price for each slip as `/parlay` does: `wager`, then `odds` (American) or `multiplier`, never both. If the user's league has money on the line, they may want the hedge to roughly cover what they'd lose; offer to work that out from the price, but leave the amount to them.
+Ask the stake and price for each slip as `/parlay` does: `wager`, then `odds` (American) or `multiplier`, never both.
 
-Show the final slips, then prompt "Save", "Change a leg" and "Cancel". Save with:
+Show the final slips, then prompt "Save", "Change a leg" and "Cancel". Save each slip with its own `save_parlay` call:
 
-- `name`: `Hedge: <opponent> (<league> wk <week>)`, plus the player for a single, e.g. `Hedge: Johnman (Shin's Classroom wk 10) · Henry`.
-- `notes`: the matchup and why, e.g. "Down 27.7 to Johnman in Shin's Classroom; Henry is their biggest remaining swing."
+- `name`: `Hedge: <slip name> (<league> wk <week>)`, e.g. `Hedge: Nightmare week (Shin's Classroom wk 10)`.
+- `notes`: the matchup and the idea, e.g. "Down 27.7 to Johnman. Cashes if Chase and Kelce flop and Henry scores."
 - `human_involved` and `model_involved` honestly, with `model: claude`, as `/parlay` describes.
 - `mock: true` if the user isn't actually placing it; ask if it's unclear.
 - `athlete_id` and `event_id` exactly as `get_matchup` returned them, `sport: nfl`, and the player's `team`.
@@ -69,4 +75,4 @@ After saving, tell the user the slips are on the board at http://localhost:3000 
 
 ## Style
 
-Be direct. Never call a hedge free money or a sure thing: it costs the stake whenever the user's fantasy week goes well, and that's the point of it. If the user is comfortably ahead, it's fine to say a hedge may not be worth it.
+Be direct. Never call a hedge free money or a sure thing: every slip costs its stake whenever the fantasy week goes well, and that's the point of it. A parlay needs every leg, so the user can lose their matchup and still lose the slip; say that once when presenting the slips, not on every one.
